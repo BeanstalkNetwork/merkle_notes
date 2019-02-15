@@ -1,0 +1,7 @@
+[package]
+name = "merkle_notes"
+version = "0.1.0"
+authors = ["Dusty Phillips <dusty@beanstalk.network>"]
+edition = "2018"
+
+[dependencies]
