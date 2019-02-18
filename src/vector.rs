@@ -1,15 +1,15 @@
-use super::{HashableElement, MerkleTree, WitnessNode};
+use super::{HashableElement, MerkleHash, MerkleTree, WitnessNode};
 use std::collections::VecDeque;
 use std::io;
 
 #[derive(Debug)]
-enum Node<H, T: HashableElement<H>> {
+enum Node<H: MerkleHash, T: HashableElement<H>> {
     Leaf(T),
     Internal(H),
     Empty,
 }
 
-impl<H, T: HashableElement<H>> Node<H, T> {
+impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
     fn from_hashes(left: &H, right: &H) -> Self {
         Node::Internal(T::combine_hash(&left, &right))
     }
@@ -33,13 +33,13 @@ impl<H, T: HashableElement<H>> Node<H, T> {
 ///  *  nearly half the tree will usually contain empty nodes
 ///  *  related nodes for a given authentication path are scattered throughout
 ///     the array
-pub struct VectorMerkleTree<H, T: HashableElement<H>> {
+pub struct VectorMerkleTree<H: MerkleHash, T: HashableElement<H>> {
     nodes: VecDeque<Node<H, T>>,
 }
 
 // TODO: This needs to fulfill the entire interface
 //impl<H, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree<H, T> {
-impl<H, T: HashableElement<H>> VectorMerkleTree<H, T> {
+impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
     pub fn new() -> Box<Self> {
@@ -240,7 +240,9 @@ mod tests {
     use super::{
         first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
     };
-    use crate::HashableElement;
+    use crate::{HashableElement, MerkleHash};
+
+    impl MerkleHash for String {}
 
     impl HashableElement<String> for String {
         fn merkle_hash(&self) -> Self {
@@ -253,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn add() {
         let mut tree = VectorMerkleTree::new();
         tree.add("a".to_string());
         assert_eq!(tree.nodes.len(), 1);
