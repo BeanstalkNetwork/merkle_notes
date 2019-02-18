@@ -1,6 +1,12 @@
 use std::io;
 use std::iter::IntoIterator;
 
+mod vector;
+
+#[cfg(test)]
+#[macro_use]
+extern crate assert_matches;
+
 /// Witness to a specific node in an authentication path.
 ///
 /// The Left/Right is the Hash of THIS node, but the HASHTYPE at node.0 is
