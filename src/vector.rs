@@ -121,40 +121,19 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         let mut index_being_added = old_vec_length - 1;
         loop {
             let left_child_in_nodes = left_child_index(index_being_added) - index_being_added - 1;
-            // Both children of being added are outside bounds of list
-            if left_child_in_nodes >= self.nodes.len() {
-                self.nodes.push_front(Node::Empty);
-            }
-            // Right child of new node is outside bounds of list, but left is in it
-            else if left_child_in_nodes == self.nodes.len() - 1 {
-                if let Node::Leaf(ref leaf_element) = self.nodes[left_child_in_nodes] {
-                    let leaf_hash = leaf_element.merkle_hash();
-                    self.nodes
-                        .push_front(Node::from_hashes(&leaf_hash, &leaf_hash));
-                } else {
-                    panic!("last child should be a leaf or this loop wouldn't have been entered");
-                }
-            } else {
-                // both children are in the list
+
                 let new_node = match (
-                    &self.nodes[left_child_in_nodes],
-                    &self.nodes[left_child_in_nodes + 1],
+                self.extract_hash(left_child_in_nodes),
+                self.extract_hash(left_child_in_nodes + 1),
                 ) {
-                    (Node::Empty, Node::Empty) => Node::Empty,
-                    (Node::Leaf(ref left), Node::Empty) => {
-                        Node::from_hashes(&left.merkle_hash(), &left.merkle_hash())
-                    }
-                    (Node::Leaf(ref left), Node::Leaf(ref right)) => {
-                        Node::from_hashes(&left.merkle_hash(), &right.merkle_hash())
-                    }
-                    (Node::Internal(ref hash), Node::Empty) => Node::from_hashes(hash, hash),
-                    (Node::Internal(ref left), Node::Internal(ref right)) => {
-                        Node::from_hashes(left, right)
+                (None, None) => Node::Empty,
+                (Some(ref hash), None) => Node::from_hashes(hash, hash),
+                (Some(ref left_hash), Some(ref right_hash)) => {
+                    Node::from_hashes(left_hash, right_hash)
                     }
                     (_, _) => panic!("Invalid tree structure"),
                 };
                 self.nodes.push_front(new_node);
-            }
 
             if index_being_added == 0 {
                 break;
@@ -171,29 +150,19 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
             let left;
             let right;
             if is_left_child(current_position) {
-                left = self.nodes.get(current_position);
-                right = self.nodes.get(current_position + 1);
+                left = self.extract_hash(current_position);
+                right = self.extract_hash(current_position + 1);
             } else {
-                left = self.nodes.get(current_position - 1);
-                right = self.nodes.get(current_position);
+                left = self.extract_hash(current_position - 1);
+                right = self.extract_hash(current_position);
             }
 
             let parent_hash = match (left, right) {
-                (Some(Node::Leaf(ref element)), None) => {
-                    T::combine_hash(&element.merkle_hash(), &element.merkle_hash())
-                }
-                (Some(Node::Leaf(ref element)), Some(Node::Empty)) => {
-                    T::combine_hash(&element.merkle_hash(), &element.merkle_hash())
-                }
-                (Some(Node::Leaf(ref left_elem)), Some(Node::Leaf(ref right_elem))) => {
-                    T::combine_hash(&left_elem.merkle_hash(), &right_elem.merkle_hash())
-                }
-                (Some(Node::Internal(ref hash)), None) => T::combine_hash(hash, hash),
-                (Some(Node::Internal(ref hash)), Some(Node::Empty)) => T::combine_hash(hash, hash),
-                (Some(Node::Internal(ref left_hash)), Some(Node::Internal(ref right_hash))) => {
+                (Some(ref hash), None) => T::combine_hash(hash, hash),
+                (Some(ref left_hash), Some(ref right_hash)) => {
                     T::combine_hash(left_hash, right_hash)
                 }
-                (a, b) => {
+                (_, _) => {
                     panic!("Invalid tree structure");
                 }
             };
@@ -208,6 +177,18 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
 
     fn is_empty(&self) -> bool {
         self.nodes.len() == 0
+    }
+
+    /// Extract the hash from a leaf or internal node.
+    ///
+    /// Returns None if the position is invalid or empty
+    fn extract_hash(&self, position: usize) -> Option<H> {
+        match self.nodes.get(position) {
+            None => None,
+            Some(Node::Empty) => None,
+            Some(Node::Leaf(ref element)) => Some(element.merkle_hash()),
+            Some(Node::Internal(ref hash)) => Some(hash.clone()),
+        }
     }
 }
 
@@ -242,6 +223,7 @@ fn left_child_index(my_index: usize) -> usize {
     (my_index + 1) * 2 - 1
 }
 
+/// Get the index of my node's parent
 fn parent_index(my_index: usize) -> usize {
     if my_index == 0 {
         panic!("Has no parents");
