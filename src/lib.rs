@@ -1,7 +1,7 @@
 use std::io;
 use std::iter::IntoIterator;
 
-mod vector;
+pub mod vector;
 
 #[cfg(test)]
 #[macro_use]
@@ -11,6 +11,8 @@ extern crate assert_matches;
 /// use bytes or a string here, but in a production system it might be a
 /// point on an elliptic curve.
 pub trait MerkleHash: Clone {}
+
+impl<T> MerkleHash for T where T: Clone {}
 
 /// Witness to a specific node in an authentication path.
 ///

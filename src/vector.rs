@@ -75,6 +75,24 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         }
     }
 
+    /// Get the number of leaf nodes in the tree
+    pub fn len(&self) -> usize {
+        if self.nodes.len() == 0 {
+            0
+        } else {
+            self.nodes.len() - first_leaf(self.nodes.len())
+        }
+    }
+
+    pub fn root_hash(&self) -> Option<H> {
+        match self.nodes.get(0) {
+            None => None,
+            Some(Node::Internal(hash)) => Some(hash.clone()),
+            Some(Node::Leaf(elem)) => Some(elem.merkle_hash()),
+            Some(Node::Empty) => panic!("Root node couldn't become empty"),
+        }
+    }
+
     /// Called when a new leaf was added to a complete binary tree, meaning
     /// that everything needs to be moved around and hashes need to be
     /// recalculated. The garbage in this method is the whole reason a vector
@@ -240,10 +258,10 @@ mod tests {
     use super::{
         first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
     };
-    use crate::{HashableElement, MerkleHash};
+    use crate::{HashableElement, MerkleHash, MerkleTree};
 
-    impl MerkleHash for String {}
-
+    /// Fake hashable element that just concatenates strings so it is easy to
+    /// test that the correct values are output.
     impl HashableElement<String> for String {
         fn merkle_hash(&self) -> Self {
             (*self).clone()
@@ -370,6 +388,33 @@ mod tests {
         assert_matches!(tree.nodes[21], Node::Leaf(ref e) if *e == "g".to_string());
         assert_matches!(tree.nodes[22], Node::Leaf(ref e) if *e == "h".to_string());
         assert_matches!(tree.nodes[23], Node::Leaf(ref e) if *e == "i".to_string());
+    }
+
+    #[test]
+    fn len() {
+        let mut tree = VectorMerkleTree::new();
+        for i in 0..100 {
+            assert_eq!(tree.len(), i);
+            tree.add("a".to_string());
+        }
+    }
+
+    #[test]
+    fn root_hash() {
+        let mut tree = VectorMerkleTree::new();
+        assert_eq!(tree.root_hash(), None);
+        tree.add("a".to_string());
+        assert_eq!(tree.root_hash(), Some("a".to_string()));
+        tree.add("b".to_string());
+        assert_eq!(tree.root_hash(), Some("ab".to_string()));
+        tree.add("c".to_string());
+        tree.add("d".to_string());
+        assert_eq!(tree.root_hash(), Some("abcd".to_string()));
+        for i in 0..12 {
+            tree.add(i.to_string());
+        }
+        println!("{:?}", tree.nodes);
+        assert_eq!(tree.root_hash(), Some("abcd01234567891011".to_string()))
     }
 
     #[test]
