@@ -1,4 +1,4 @@
-use super::{HashableElement, MerkleHash, MerkleTree, WitnessNode};
+use super::{HashableElement, MerkleHash, WitnessNode};
 use std::collections::VecDeque;
 use std::io;
 
@@ -104,6 +104,38 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
             }
             cur
         })
+    }
+
+    /// What was the root of the tree when it had past_size leaf nodes
+    pub fn past_root(&self, past_size: usize) -> Option<H> {
+        if self.nodes.len() == 0 || past_size > self.len() {
+            return None;
+        }
+        let mut cur = first_leaf(self.nodes.len()) + past_size - 1;
+        let mut current_hash = self
+            .extract_hash(cur)
+            .expect("current node must be in tree");
+        let mut num_levels = 1;
+        while !is_leftmost_path(cur) {
+            if is_left_child(cur) {
+                // We're walking the right-most path, so a left child can't
+                // possibly have a sibling
+                current_hash = T::combine_hash(&current_hash, &current_hash);
+            } else {
+                let sibling_hash = self
+                    .extract_hash(cur - 1)
+                    .expect("Sibling node must be in tree");
+                current_hash = T::combine_hash(&sibling_hash, &current_hash);
+            }
+            cur = parent_index(cur);
+            num_levels += 1;
+        }
+
+        while num_levels < self.tree_depth {
+            current_hash = T::combine_hash(&current_hash, &current_hash);
+            num_levels += 1;
+        }
+        return Some(current_hash);
     }
 
     /// Construct the proof that the leaf node at `position` exists.
@@ -251,6 +283,14 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
 fn is_complete(num_nodes: usize) -> bool {
     let level_counter = num_nodes + 1;
     level_counter & (level_counter - 1) == 0
+}
+
+/// any node that is "furthest left" in the tree. It is a left-child itself
+/// and all its parent nodes are also left children It's the same math as
+/// is_complete, since its a zero-indexed list, but I've given it a new name
+/// for legibility.
+fn is_leftmost_path(my_index: usize) -> bool {
+    is_complete(my_index)
 }
 
 /// The number of levels in the tree, including the last unfinished level
@@ -456,21 +496,53 @@ mod tests {
     }
 
     #[test]
-    fn root_hash() {
+    fn root_hash_functions() {
         let mut tree = VectorMerkleTree::new_with_size(5);
         assert_eq!(tree.root_hash(), None);
+        assert_eq!(tree.past_root(1), None);
         tree.add("a".to_string());
         assert_eq!(tree.root_hash(), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(2), None);
         tree.add("b".to_string());
         assert_eq!(tree.root_hash(), Some("abababababababab".to_string()));
+        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
+        assert_eq!(tree.past_root(3), None);
         tree.add("c".to_string());
         assert_eq!(tree.root_hash(), Some("abccabccabccabcc".to_string()));
+        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
+        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
+        assert_eq!(tree.past_root(4), None);
         tree.add("d".to_string());
         assert_eq!(tree.root_hash(), Some("abcdabcdabcdabcd".to_string()));
+        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
+        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
+        assert_eq!(tree.past_root(4), Some("abcdabcdabcdabcd".to_string()));
+        assert_eq!(tree.past_root(5), None);
         for i in 0..12 {
             tree.add(i.to_string());
         }
-        assert_eq!(tree.root_hash(), Some("abcd01234567891011".to_string()))
+        assert_eq!(tree.root_hash(), Some("abcd01234567891011".to_string()));
+        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
+        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
+        assert_eq!(tree.past_root(4), Some("abcdabcdabcdabcd".to_string()));
+        assert_eq!(tree.past_root(5), Some("abcd0000abcd0000".to_string()));
+        assert_eq!(tree.past_root(6), Some("abcd0101abcd0101".to_string()));
+        assert_eq!(tree.past_root(7), Some("abcd0122abcd0122".to_string()));
+        assert_eq!(tree.past_root(8), Some("abcd0123abcd0123".to_string()));
+        assert_eq!(tree.past_root(9), Some("abcd012344444444".to_string()));
+        assert_eq!(tree.past_root(10), Some("abcd012345454545".to_string()));
+        assert_eq!(tree.past_root(11), Some("abcd012345664566".to_string()));
+        assert_eq!(tree.past_root(12), Some("abcd012345674567".to_string()));
+        assert_eq!(tree.past_root(13), Some("abcd012345678888".to_string()));
+        assert_eq!(tree.past_root(14), Some("abcd012345678989".to_string()));
+        assert_eq!(tree.past_root(15), Some("abcd01234567891010".to_string()));
+        assert_eq!(tree.past_root(16), Some("abcd01234567891011".to_string()));
+        assert_eq!(tree.past_root(17), None);
     }
 
     #[test]

@@ -50,6 +50,10 @@ pub trait MerkleTree<H: MerkleHash, T: HashableElement<H>>: IntoIterator {
     /// Get the hash of the current root element in the tree.
     fn root_hash(&self) -> Option<H>;
 
+    /// Calculate what the root hash was at the time the tree contained
+    /// `past_size` elements.
+    fn past_root(&self, past_size: usize) -> H;
+
     /// Construct the proof that the leaf node at `position` exists.
     ///
     /// The length of the returned vector is the depth of the leaf node in the
@@ -61,10 +65,6 @@ pub trait MerkleTree<H: MerkleHash, T: HashableElement<H>>: IntoIterator {
     ///
     /// The root hash is not included in the authentication path.
     fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>>;
-
-    /// Calculate what the root hash was at the time the tree contained
-    /// `past_size` elements.
-    fn past_root(&self, past_size: usize) -> H;
 
     /// Serialize the Merkle tree to a writer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
