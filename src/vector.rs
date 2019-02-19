@@ -75,6 +75,9 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         if self.is_empty() {
             self.nodes.push_back(Node::Leaf(element));
         } else if is_complete(self.nodes.len()) {
+            if num_levels(self.nodes.len()) == self.tree_depth {
+                panic!("Tree is full!");
+            }
             self.rehash_all_levels(element);
         } else {
             self.nodes.push_back(Node::Leaf(element));
