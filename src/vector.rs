@@ -96,13 +96,14 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
 
     /// The current root hash of the tree.
     pub fn root_hash(&self) -> Option<H> {
-        // TODO: This needs to be moved to tree_depth level mode.
-        match self.nodes.get(0) {
-            None => None,
-            Some(Node::Internal(hash)) => Some(hash.clone()),
-            Some(Node::Leaf(elem)) => Some(elem.merkle_hash()),
-            Some(Node::Empty) => panic!("Root node couldn't become empty"),
-        }
+        self.extract_hash(0).map(|h| {
+            let extra_levels = self.tree_depth - num_levels(self.nodes.len());
+            let mut cur = h;
+            for _ in 0..extra_levels {
+                cur = T::combine_hash(&cur, &cur)
+            }
+            cur
+        })
     }
 
     /// Construct the proof that the leaf node at `position` exists.
@@ -456,15 +457,16 @@ mod tests {
 
     #[test]
     fn root_hash() {
-        let mut tree = VectorMerkleTree::new();
+        let mut tree = VectorMerkleTree::new_with_size(5);
         assert_eq!(tree.root_hash(), None);
         tree.add("a".to_string());
-        assert_eq!(tree.root_hash(), Some("a".to_string()));
+        assert_eq!(tree.root_hash(), Some("aaaaaaaaaaaaaaaa".to_string()));
         tree.add("b".to_string());
-        assert_eq!(tree.root_hash(), Some("ab".to_string()));
+        assert_eq!(tree.root_hash(), Some("abababababababab".to_string()));
         tree.add("c".to_string());
+        assert_eq!(tree.root_hash(), Some("abccabccabccabcc".to_string()));
         tree.add("d".to_string());
-        assert_eq!(tree.root_hash(), Some("abcd".to_string()));
+        assert_eq!(tree.root_hash(), Some("abcdabcdabcdabcd".to_string()));
         for i in 0..12 {
             tree.add(i.to_string());
         }
