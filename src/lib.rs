@@ -18,7 +18,6 @@ impl<T> MerkleHash for T where T: Clone {}
 ///
 /// The Left/Right is the Hash of THIS node, but the MerkleHash at node.0 is
 /// the hash of the SIBLING node.
-///
 pub enum WitnessNode<H: MerkleHash> {
     Left(H),
     Right(H),
@@ -61,7 +60,7 @@ pub trait MerkleTree<H: MerkleHash, T: HashableElement<H>>: IntoIterator {
     /// the hash of the child of the root node.
     ///
     /// The root hash is not included in the authentication path.
-    fn witness_path(&self, position: usize) -> Vec<WitnessNode<H>>;
+    fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>>;
 
     /// Calculate what the root hash was at the time the tree contained
     /// `past_size` elements.

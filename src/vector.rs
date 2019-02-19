@@ -24,7 +24,7 @@ impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
 /// implementation up and running for testing external trees as soon
 /// as possible.
 ///
-/// Treats the tree as fixed-sized with 32 levels. Calculating the hash of an
+/// Treats the tree as fixed-height with 32 levels. Calculating the hash of an
 /// element with an empty right child is done by hashing it with itself.
 ///
 /// Design inefficiencies:
@@ -35,6 +35,7 @@ impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
 ///     the array
 pub struct VectorMerkleTree<H: MerkleHash, T: HashableElement<H>> {
     nodes: VecDeque<Node<H, T>>,
+    tree_depth: usize,
 }
 
 // TODO: This needs to fulfill the entire interface
@@ -43,8 +44,14 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
     pub fn new() -> Box<Self> {
+        VectorMerkleTree::new_with_size(32)
+    }
+
+    /// Used for simpler unit tests
+    fn new_with_size(tree_depth: usize) -> Box<Self> {
         Box::new(VectorMerkleTree {
             nodes: VecDeque::new(),
+            tree_depth,
         })
     }
 
@@ -84,13 +91,58 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         }
     }
 
+    /// The current root hash of the tree.
     pub fn root_hash(&self) -> Option<H> {
+        // TODO: This needs to be moved to tree_depth level mode.
         match self.nodes.get(0) {
             None => None,
             Some(Node::Internal(hash)) => Some(hash.clone()),
             Some(Node::Leaf(elem)) => Some(elem.merkle_hash()),
             Some(Node::Empty) => panic!("Root node couldn't become empty"),
         }
+    }
+
+    /// Construct the proof that the leaf node at `position` exists.
+    ///
+    /// In this implementation, we guarantee that the witness_path is
+    /// tree_depth levels deep by repeatedly hashing the
+    /// last root_hash with itself.
+    pub fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>> {
+        if self.len() == 0 || position >= self.len() {
+            return None;
+        }
+        let mut witnesses = vec![];
+        let mut current_position = first_leaf(self.nodes.len()) + position;
+
+        while current_position != 0 {
+            if let Some(my_hash) = self.extract_hash(current_position) {
+                if is_left_child(current_position) {
+                    let sibling_hash = self
+                        .extract_hash(current_position + 1)
+                        .unwrap_or_else(|| my_hash.clone());
+                    witnesses.push(WitnessNode::Left(sibling_hash));
+                } else {
+                    let sibling_hash = self
+                        .extract_hash(current_position - 1)
+                        .expect("left child must exist if right child does");
+                    witnesses.push(WitnessNode::Right(sibling_hash));
+                }
+            } else {
+                panic!("Invalid tree structure");
+            }
+            current_position = parent_index(current_position);
+        }
+
+        // Assuming the root hash isn't at the top of a tree that has tree_depth
+        // levels, it needs to be added to the tree and hashed with itself until
+        // the appropriate hash is found
+        let mut sibling_hash = self.extract_hash(0).expect("Tree couldn't be empty");
+        while witnesses.len() < self.tree_depth - 1 {
+            witnesses.push(WitnessNode::Left(sibling_hash.clone()));
+            sibling_hash = T::combine_hash(&sibling_hash, &sibling_hash);
+        }
+
+        Some(witnesses)
     }
 
     /// Called when a new leaf was added to a complete binary tree, meaning
@@ -103,8 +155,6 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
 
         let old_vec_length = self.nodes.len();
         let old_leaf_start = first_leaf(old_vec_length);
-        let old_num_leaves = old_vec_length - old_leaf_start;
-        let new_vec_length = old_vec_length + old_num_leaves + 1;
 
         for _ in old_leaf_start..old_vec_length {
             new_vec.push_front(self.nodes.pop_back().expect("There are more nodes"));
@@ -122,18 +172,18 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         loop {
             let left_child_in_nodes = left_child_index(index_being_added) - index_being_added - 1;
 
-                let new_node = match (
+            let new_node = match (
                 self.extract_hash(left_child_in_nodes),
                 self.extract_hash(left_child_in_nodes + 1),
-                ) {
+            ) {
                 (None, None) => Node::Empty,
                 (Some(ref hash), None) => Node::from_hashes(hash, hash),
                 (Some(ref left_hash), Some(ref right_hash)) => {
                     Node::from_hashes(left_hash, right_hash)
-                    }
-                    (_, _) => panic!("Invalid tree structure"),
-                };
-                self.nodes.push_front(new_node);
+                }
+                (_, _) => panic!("Invalid tree structure"),
+            };
+            self.nodes.push_front(new_node);
 
             if index_being_added == 0 {
                 break;
@@ -240,7 +290,8 @@ mod tests {
     use super::{
         first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
     };
-    use crate::{HashableElement, MerkleHash, MerkleTree};
+    use crate::{HashableElement, WitnessNode};
+    use std::fmt;
 
     /// Fake hashable element that just concatenates strings so it is easy to
     /// test that the correct values are output.
@@ -251,6 +302,25 @@ mod tests {
 
         fn combine_hash(left: &String, right: &String) -> Self {
             (*left).clone() + right
+        }
+    }
+
+    impl fmt::Debug for WitnessNode<String> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                WitnessNode::Left(hash) => write!(f, "Left {}", hash),
+                WitnessNode::Right(hash) => write!(f, "Right {}", hash),
+            }
+        }
+    }
+
+    impl PartialEq for WitnessNode<String> {
+        fn eq(&self, other: &WitnessNode<String>) -> bool {
+            match (self, other) {
+                (WitnessNode::Left(a), WitnessNode::Left(b)) => a == b,
+                (WitnessNode::Right(a), WitnessNode::Right(b)) => a == b,
+                (_, _) => false,
+            }
         }
     }
 
@@ -395,8 +465,124 @@ mod tests {
         for i in 0..12 {
             tree.add(i.to_string());
         }
-        println!("{:?}", tree.nodes);
         assert_eq!(tree.root_hash(), Some("abcd01234567891011".to_string()))
+    }
+
+    #[test]
+    fn witness_path() {
+        // Tree with 4 levels (8 leaves) for easier reasoning
+        let mut tree = VectorMerkleTree::new_with_size(4);
+        assert!(tree.witness_path(0).is_none());
+        tree.add("a".to_string());
+        assert!(tree.witness_path(1).is_none());
+        assert_eq!(
+            tree.witness_path(0).expect("path exists"),
+            vec![
+                WitnessNode::Left("a".to_string()),
+                WitnessNode::Left("aa".to_string()),
+                WitnessNode::Left("aaaa".to_string()),
+            ]
+        );
+
+        tree.add("b".to_string());
+        assert!(tree.witness_path(2).is_none());
+        assert_eq!(
+            tree.witness_path(0).expect("path exists"),
+            vec![
+                WitnessNode::Left("b".to_string()),
+                WitnessNode::Left("ab".to_string()),
+                WitnessNode::Left("abab".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(1).expect("path exists"),
+            vec![
+                WitnessNode::Right("a".to_string()),
+                WitnessNode::Left("ab".to_string()),
+                WitnessNode::Left("abab".to_string()),
+            ]
+        );
+
+        tree.add("c".to_string());
+        assert!(tree.witness_path(3).is_none());
+        assert_eq!(
+            tree.witness_path(0).expect("path exists"),
+            vec![
+                WitnessNode::Left("b".to_string()),
+                WitnessNode::Left("cc".to_string()),
+                WitnessNode::Left("abcc".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(1).expect("path exists"),
+            vec![
+                WitnessNode::Right("a".to_string()),
+                WitnessNode::Left("cc".to_string()),
+                WitnessNode::Left("abcc".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(2).expect("path exists"),
+            vec![
+                WitnessNode::Left("c".to_string()),
+                WitnessNode::Right("ab".to_string()),
+                WitnessNode::Left("abcc".to_string()),
+            ]
+        );
+        tree.add("d".to_string());
+        assert!(tree.witness_path(4).is_none());
+        assert_eq!(
+            tree.witness_path(3).expect("path exists"),
+            vec![
+                WitnessNode::Right("c".to_string()),
+                WitnessNode::Right("ab".to_string()),
+                WitnessNode::Left("abcd".to_string()),
+            ]
+        );
+        for i in 0..4 {
+            tree.add(i.to_string());
+        }
+        assert!(tree.witness_path(8).is_none());
+        assert_eq!(
+            tree.witness_path(3).expect("path exists"),
+            vec![
+                WitnessNode::Right("c".to_string()),
+                WitnessNode::Right("ab".to_string()),
+                WitnessNode::Left("0123".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(4).expect("path exists"),
+            vec![
+                WitnessNode::Left("1".to_string()),
+                WitnessNode::Left("23".to_string()),
+                WitnessNode::Right("abcd".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(5).expect("path exists"),
+            vec![
+                WitnessNode::Right("0".to_string()),
+                WitnessNode::Left("23".to_string()),
+                WitnessNode::Right("abcd".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(6).expect("path exists"),
+            vec![
+                WitnessNode::Left("3".to_string()),
+                WitnessNode::Right("01".to_string()),
+                WitnessNode::Right("abcd".to_string()),
+            ]
+        );
+        assert_eq!(
+            tree.witness_path(7).expect("path exists"),
+            vec![
+                WitnessNode::Right("2".to_string()),
+                WitnessNode::Right("01".to_string()),
+                WitnessNode::Right("abcd".to_string()),
+            ]
+        );
     }
 
     #[test]
