@@ -37,7 +37,10 @@ pub trait HashableElement<H: MerkleHash> {
 /// Interface for an append-only Merkle tree. The methods it supports are
 /// specifically useful for crypto-currency style commitments, where each leaf
 /// represents one note. There may be other use cases, however.
-pub trait MerkleTree<H: MerkleHash, T: HashableElement<H>>: IntoIterator {
+pub trait MerkleTree<H: MerkleHash, T: HashableElement<H>>
+where
+    for<'a> &'a Self: IntoIterator,
+{
     /// Deserialize the Merkle tree from a reader.
     fn read<R: io::Read>(&self, reader: &mut R) -> io::Result<Box<Self>>;
 

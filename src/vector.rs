@@ -15,6 +15,34 @@ impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
     }
 }
 
+pub struct VectorLeafIterator<'a, H: MerkleHash, T: HashableElement<H>> {
+    node_iter: std::iter::Skip<std::collections::vec_deque::Iter<'a, Node<H, T>>>,
+}
+
+impl<'a, H: MerkleHash, T: HashableElement<H>> VectorLeafIterator<'a, H, T> {
+    fn new(nodes: &'a VecDeque<Node<H, T>>) -> VectorLeafIterator<'a, H, T> {
+        let first_leaf_index = if nodes.len() > 0 {
+            first_leaf(nodes.len())
+        } else {
+            0
+        };
+        let node_iter = nodes.iter().skip(first_leaf_index);
+        VectorLeafIterator { node_iter }
+    }
+}
+impl<'a, H: MerkleHash, T: HashableElement<H>> Iterator for VectorLeafIterator<'a, H, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.node_iter.next().map(|node| {
+            if let Node::Leaf(ref item) = node {
+                item
+            } else {
+                panic!("Expect all leaf nodes in order");
+            }
+        })
+    }
+}
+
 /// Basic implementation of the MerkleTree trait. The tree is stored in a
 /// vector as a complete binary tree, and index calculations are used to
 /// look up nodes relative to each other.
@@ -228,41 +256,13 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         }
     }
 
-    fn rehash_leaf_path(&mut self) {
-        let mut current_position = self.nodes.len() - 1;
+impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkleTree<H, T> {
+    type Item = &'a T;
+    type IntoIter = VectorLeafIterator<'a, H, T>;
 
-        while current_position != 0 {
-            let parent_position = parent_index(current_position);
-            let left;
-            let right;
-            if is_left_child(current_position) {
-                left = self.extract_hash(current_position);
-                right = self.extract_hash(current_position + 1);
-            } else {
-                left = self.extract_hash(current_position - 1);
-                right = self.extract_hash(current_position);
+    fn into_iter(self) -> Self::IntoIter {
+        VectorLeafIterator::new(&self.nodes)
             }
-
-            let parent_hash = match (left, right) {
-                (Some(ref hash), None) => T::combine_hash(hash, hash),
-                (Some(ref left_hash), Some(ref right_hash)) => {
-                    T::combine_hash(left_hash, right_hash)
-                }
-                (_, _) => {
-                    panic!("Invalid tree structure");
-                }
-            };
-
-            self.nodes[parent_position] = Node::Internal(parent_hash);
-
-            current_position = parent_position;
-        }
-
-        //let parent_position = parent_po
-    }
-
-    fn is_empty(&self) -> bool {
-        self.nodes.len() == 0
     }
 
     /// Extract the hash from a leaf or internal node.
@@ -660,6 +660,71 @@ mod tests {
                 WitnessNode::Right("abcd".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn iteration() {
+        let mut tree = VectorMerkleTree::new();
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), None);
+
+        tree.add("a".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), None);
+
+        tree.add("b".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), None);
+
+        tree.add("c".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), Some(&"c".to_string()));
+        assert_eq!(iter.next(), None);
+
+        tree.add("d".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), Some(&"c".to_string()));
+        assert_eq!(iter.next(), Some(&"d".to_string()));
+        assert_eq!(iter.next(), None);
+
+        tree.add("e".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), Some(&"c".to_string()));
+        assert_eq!(iter.next(), Some(&"d".to_string()));
+        assert_eq!(iter.next(), Some(&"e".to_string()));
+        assert_eq!(iter.next(), None);
+
+        tree.add("f".to_string());
+        let mut iter = tree.into_iter();
+        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), Some(&"c".to_string()));
+        assert_eq!(iter.next(), Some(&"d".to_string()));
+        assert_eq!(iter.next(), Some(&"e".to_string()));
+        assert_eq!(iter.next(), Some(&"f".to_string()));
+        assert_eq!(iter.next(), None);
+
+        for i in 0..100 {
+            tree.add(i.to_string());
+        }
+        let mut iter = tree.into_iter();
+        for char in ["a", "b", "c", "d", "e", "f"].iter() {
+            assert_eq!(iter.next(), Some(&char.to_string()));
+        }
+
+        for i in 0..100 {
+            assert_eq!(iter.next(), Some(&i.to_string()));
+        }
+        assert_eq!(iter.next(), None);
     }
 
     #[test]
