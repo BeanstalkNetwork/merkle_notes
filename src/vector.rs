@@ -3,7 +3,7 @@
 /// as a complete binary tree. This is dreadfully inefficient, but
 /// it was a quick way to get an API implementation up and running.
 extern crate byteorder;
-use super::{HashableElement, MerkleHash, MerkleTree, WitnessNode};
+use super::{HashableElement, MerkleTree, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
