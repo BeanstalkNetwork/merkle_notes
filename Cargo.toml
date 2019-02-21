@@ -5,6 +5,7 @@ authors = ["Dusty Phillips <dusty@beanstalk.network>"]
 edition = "2018"
 
 [dependencies]
+byteorder = "1.3.1"
 
 [dev-dependencies]
 assert_matches = "1.3.0"

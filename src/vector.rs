@@ -1,4 +1,6 @@
-use super::{HashableElement, MerkleHash, WitnessNode};
+extern crate byteorder;
+use super::{HashableElement, MerkleHash, MerkleTree, WitnessNode};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
 
@@ -66,8 +68,6 @@ pub struct VectorMerkleTree<H: MerkleHash, T: HashableElement<H>> {
     tree_depth: usize,
 }
 
-// TODO: This needs to fulfill the entire interface
-//impl<H, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree<H, T> {
 impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
@@ -81,132 +81,6 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
             nodes: VecDeque::new(),
             tree_depth,
         })
-    }
-
-    /// Load a merkle tree from a reader and return a box pointer to it
-    pub fn read<R: io::Read>(&self, reader: &mut R) -> io::Result<Box<Self>> {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Not implemented yet",
-        ))
-    }
-
-    /// Add a new element to the Merkle Tree, keeping the internal array
-    /// consistent as necessary.
-    ///
-    /// If
-    ///  *  the vector is currently a complete binary tree
-    ///      *  then allocate a new vector and compute all new hashes
-    ///  *  otherwise
-    ///      *  append an element and update all its parent hashes
-    pub fn add(&mut self, element: T) {
-        if self.is_empty() {
-            self.nodes.push_back(Node::Leaf(element));
-        } else if is_complete(self.nodes.len()) {
-            if num_levels(self.nodes.len()) == self.tree_depth {
-                panic!("Tree is full!");
-            }
-            self.rehash_all_levels(element);
-        } else {
-            self.nodes.push_back(Node::Leaf(element));
-            self.rehash_leaf_path();
-        }
-    }
-
-    /// Get the number of leaf nodes in the tree
-    pub fn len(&self) -> usize {
-        if self.nodes.len() == 0 {
-            0
-        } else {
-            self.nodes.len() - first_leaf(self.nodes.len())
-        }
-    }
-
-    /// The current root hash of the tree.
-    pub fn root_hash(&self) -> Option<H> {
-        self.extract_hash(0).map(|h| {
-            let extra_levels = self.tree_depth - num_levels(self.nodes.len());
-            let mut cur = h;
-            for _ in 0..extra_levels {
-                cur = T::combine_hash(&cur, &cur)
-            }
-            cur
-        })
-    }
-
-    /// What was the root of the tree when it had past_size leaf nodes
-    pub fn past_root(&self, past_size: usize) -> Option<H> {
-        if self.nodes.len() == 0 || past_size > self.len() {
-            return None;
-        }
-        let mut cur = first_leaf(self.nodes.len()) + past_size - 1;
-        let mut current_hash = self
-            .extract_hash(cur)
-            .expect("current node must be in tree");
-        let mut num_levels = 1;
-        while !is_leftmost_path(cur) {
-            if is_left_child(cur) {
-                // We're walking the right-most path, so a left child can't
-                // possibly have a sibling
-                current_hash = T::combine_hash(&current_hash, &current_hash);
-            } else {
-                let sibling_hash = self
-                    .extract_hash(cur - 1)
-                    .expect("Sibling node must be in tree");
-                current_hash = T::combine_hash(&sibling_hash, &current_hash);
-            }
-            cur = parent_index(cur);
-            num_levels += 1;
-        }
-
-        while num_levels < self.tree_depth {
-            current_hash = T::combine_hash(&current_hash, &current_hash);
-            num_levels += 1;
-        }
-        return Some(current_hash);
-    }
-
-    /// Construct the proof that the leaf node at `position` exists.
-    ///
-    /// In this implementation, we guarantee that the witness_path is
-    /// tree_depth levels deep by repeatedly hashing the
-    /// last root_hash with itself.
-    pub fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>> {
-        if self.len() == 0 || position >= self.len() {
-            return None;
-        }
-        let mut witnesses = vec![];
-        let mut current_position = first_leaf(self.nodes.len()) + position;
-
-        while current_position != 0 {
-            if let Some(my_hash) = self.extract_hash(current_position) {
-                if is_left_child(current_position) {
-                    let sibling_hash = self
-                        .extract_hash(current_position + 1)
-                        .unwrap_or_else(|| my_hash.clone());
-                    witnesses.push(WitnessNode::Left(sibling_hash));
-                } else {
-                    let sibling_hash = self
-                        .extract_hash(current_position - 1)
-                        .expect("left child must exist if right child does");
-                    witnesses.push(WitnessNode::Right(sibling_hash));
-                }
-            } else {
-                panic!("Invalid tree structure");
-            }
-            current_position = parent_index(current_position);
-        }
-
-        // Assuming the root hash isn't at the top of a tree that has tree_depth
-        // levels, it needs to be added to the tree and hashed with itself until
-        // the appropriate hash is found
-        let mut sibling_hash = self.extract_hash(0).expect("Tree couldn't be empty");
-        while witnesses.len() < self.tree_depth - 1 {
-            witnesses.push(WitnessNode::Left(sibling_hash.clone()));
-            sibling_hash = T::combine_hash(&sibling_hash, &sibling_hash);
-        }
-
-        Some(witnesses)
     }
 
     /// Called when a new leaf was added to a complete binary tree, meaning
@@ -256,13 +130,41 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
         }
     }
 
-impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkleTree<H, T> {
-    type Item = &'a T;
-    type IntoIter = VectorLeafIterator<'a, H, T>;
+    fn rehash_leaf_path(&mut self) {
+        let mut current_position = self.nodes.len() - 1;
 
-    fn into_iter(self) -> Self::IntoIter {
-        VectorLeafIterator::new(&self.nodes)
+        while current_position != 0 {
+            let parent_position = parent_index(current_position);
+            let left;
+            let right;
+            if is_left_child(current_position) {
+                left = self.extract_hash(current_position);
+                right = self.extract_hash(current_position + 1);
+            } else {
+                left = self.extract_hash(current_position - 1);
+                right = self.extract_hash(current_position);
             }
+
+            let parent_hash = match (left, right) {
+                (Some(ref hash), None) => T::combine_hash(hash, hash),
+                (Some(ref left_hash), Some(ref right_hash)) => {
+                    T::combine_hash(left_hash, right_hash)
+                }
+                (_, _) => {
+                    panic!("Invalid tree structure");
+                }
+            };
+
+            self.nodes[parent_position] = Node::Internal(parent_hash);
+
+            current_position = parent_position;
+        }
+
+        //let parent_position = parent_po
+    }
+
+    fn is_empty(&self) -> bool {
+        self.nodes.len() == 0
     }
 
     /// Extract the hash from a leaf or internal node.
@@ -278,6 +180,154 @@ impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkle
     }
 }
 
+impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree<H, T> {
+    /// Load a merkle tree from a reader and return a box pointer to it
+    fn read<R: io::Read>(reader: &mut R) -> io::Result<Box<Self>> {
+        let tree_depth = reader.read_u8()?;
+        let num_nodes = reader.read_u32::<LittleEndian>()?;
+        let mut tree = VectorMerkleTree::new_with_size(tree_depth as usize);
+        for _ in 0..num_nodes {
+            tree.add(T::read(reader)?);
+        }
+        Ok(tree)
+    }
+
+    /// Add a new element to the Merkle Tree, keeping the internal array
+    /// consistent as necessary.
+    ///
+    /// If
+    ///  *  the vector is currently a complete binary tree
+    ///      *  then allocate a new vector and compute all new hashes
+    ///  *  otherwise
+    ///      *  append an element and update all its parent hashes
+    fn add(&mut self, element: T) {
+        if self.is_empty() {
+            self.nodes.push_back(Node::Leaf(element));
+        } else if is_complete(self.nodes.len()) {
+            if num_levels(self.nodes.len()) == self.tree_depth {
+                panic!("Tree is full!");
+            }
+            self.rehash_all_levels(element);
+        } else {
+            self.nodes.push_back(Node::Leaf(element));
+            self.rehash_leaf_path();
+        }
+    }
+
+    /// Get the number of leaf nodes in the tree
+    fn len(&self) -> usize {
+        if self.nodes.len() == 0 {
+            0
+        } else {
+            self.nodes.len() - first_leaf(self.nodes.len())
+        }
+    }
+
+    /// The current root hash of the tree.
+    fn root_hash(&self) -> Option<H> {
+        self.extract_hash(0).map(|h| {
+            let extra_levels = self.tree_depth - num_levels(self.nodes.len());
+            let mut cur = h;
+            for _ in 0..extra_levels {
+                cur = T::combine_hash(&cur, &cur)
+            }
+            cur
+        })
+    }
+
+    /// What was the root of the tree when it had past_size leaf nodes
+    fn past_root(&self, past_size: usize) -> Option<H> {
+        if self.nodes.len() == 0 || past_size > self.len() {
+            return None;
+        }
+        let mut cur = first_leaf(self.nodes.len()) + past_size - 1;
+        let mut current_hash = self
+            .extract_hash(cur)
+            .expect("current node must be in tree");
+        let mut num_levels = 1;
+        while !is_leftmost_path(cur) {
+            if is_left_child(cur) {
+                // We're walking the right-most path, so a left child can't
+                // possibly have a sibling
+                current_hash = T::combine_hash(&current_hash, &current_hash);
+            } else {
+                let sibling_hash = self
+                    .extract_hash(cur - 1)
+                    .expect("Sibling node must be in tree");
+                current_hash = T::combine_hash(&sibling_hash, &current_hash);
+            }
+            cur = parent_index(cur);
+            num_levels += 1;
+        }
+
+        while num_levels < self.tree_depth {
+            current_hash = T::combine_hash(&current_hash, &current_hash);
+            num_levels += 1;
+        }
+        return Some(current_hash);
+    }
+
+    /// Construct the proof that the leaf node at `position` exists.
+    ///
+    /// In this implementation, we guarantee that the witness_path is
+    /// tree_depth levels deep by repeatedly hashing the
+    /// last root_hash with itself.
+    fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>> {
+        if self.len() == 0 || position >= self.len() {
+            return None;
+        }
+        let mut witnesses = vec![];
+        let mut current_position = first_leaf(self.nodes.len()) + position;
+
+        while current_position != 0 {
+            if let Some(my_hash) = self.extract_hash(current_position) {
+                if is_left_child(current_position) {
+                    let sibling_hash = self
+                        .extract_hash(current_position + 1)
+                        .unwrap_or_else(|| my_hash.clone());
+                    witnesses.push(WitnessNode::Left(sibling_hash));
+                } else {
+                    let sibling_hash = self
+                        .extract_hash(current_position - 1)
+                        .expect("left child must exist if right child does");
+                    witnesses.push(WitnessNode::Right(sibling_hash));
+                }
+            } else {
+                panic!("Invalid tree structure");
+            }
+            current_position = parent_index(current_position);
+        }
+
+        // Assuming the root hash isn't at the top of a tree that has tree_depth
+        // levels, it needs to be added to the tree and hashed with itself until
+        // the appropriate hash is found
+        let mut sibling_hash = self.extract_hash(0).expect("Tree couldn't be empty");
+        while witnesses.len() < self.tree_depth - 1 {
+            witnesses.push(WitnessNode::Left(sibling_hash.clone()));
+            sibling_hash = T::combine_hash(&sibling_hash, &sibling_hash);
+        }
+
+        Some(witnesses)
+    }
+    /// Write the vector to an array
+    fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u8(self.tree_depth as u8)?;
+        writer.write_u32::<LittleEndian>(self.len() as u32)?;
+        for element in self {
+            element.write(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkleTree<H, T> {
+    type Item = &'a T;
+    type IntoIter = VectorLeafIterator<'a, H, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        VectorLeafIterator::new(&self.nodes)
+    }
+}
 /// Is it a complete binary tree that would need a new level if we added
 /// a node? (It's complete if the number of nodes is a power of two)
 fn is_complete(num_nodes: usize) -> bool {
@@ -334,11 +384,15 @@ mod tests {
     use super::{
         first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
     };
-    use crate::{HashableElement, WitnessNode};
+    use crate::{HashableElement, MerkleTree, WitnessNode};
+    use byteorder::{ReadBytesExt, WriteBytesExt};
     use std::fmt;
+    use std::io;
+    use std::io::Read;
 
     /// Fake hashable element that just concatenates strings so it is easy to
-    /// test that the correct values are output.
+    /// test that the correct values are output. It's weird cause the hashes are
+    /// also strings. Probably best to ignore this impl and just read the tests!
     impl HashableElement<String> for String {
         fn merkle_hash(&self) -> Self {
             (*self).clone()
@@ -346,6 +400,30 @@ mod tests {
 
         fn combine_hash(left: &String, right: &String) -> Self {
             (*left).clone() + right
+        }
+
+        fn read<R: io::Read>(reader: &mut R) -> io::Result<String> {
+            let str_size = reader.read_u8()?;
+            // There has GOT to be a better way to do this...
+            let bytes = reader
+                .take(str_size as u64)
+                .bytes()
+                .map(|b| b.unwrap())
+                .collect::<Vec<u8>>();
+            match String::from_utf8(bytes) {
+                Ok(s) => Ok(s),
+                Err(_) => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "shouldn't go wrong",
+                )),
+            }
+        }
+
+        fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+            let bytes = self.as_bytes();
+            writer.write_u8(bytes.len() as u8)?;
+            writer.write_all(bytes)?;
+            Ok(())
         }
     }
 
@@ -725,6 +803,28 @@ mod tests {
             assert_eq!(iter.next(), Some(&i.to_string()));
         }
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn serialization() {
+        let mut tree = VectorMerkleTree::new_with_size(5);
+        for i in 0..12 {
+            tree.add(i.to_string());
+        }
+        let mut bytes = vec![];
+        tree.write(&mut bytes)
+            .expect("should be able to write bytes.");
+        println!("{:?}", bytes);
+
+        let read_back_tree: Box<VectorMerkleTree<String, String>> =
+            VectorMerkleTree::read(&mut bytes[..].as_ref()).expect("should be able to read bytes.");
+
+        let mut bytes_again = vec![];
+        println!("{:?}", bytes_again);
+        read_back_tree
+            .write(&mut bytes_again)
+            .expect("should still be able to write bytes.");
+        assert_eq!(bytes, bytes_again);
     }
 
     #[test]

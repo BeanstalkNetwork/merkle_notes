@@ -1,5 +1,4 @@
 use std::io;
-use std::iter::IntoIterator;
 
 pub mod vector;
 
@@ -10,6 +9,8 @@ extern crate assert_matches;
 /// An object that can be used as a hash in a Merkle tree. Basic usage might
 /// use bytes or a string here, but in a production system it might be a
 /// point on an elliptic curve.
+///
+/// Any clonable element can be used as a MerkleHash without an adapter (for now)
 pub trait MerkleHash: Clone {}
 
 impl<T> MerkleHash for T where T: Clone {}
@@ -26,9 +27,20 @@ pub enum WitnessNode<H: MerkleHash> {
 /// A leaf node in the Merkle tree. Each leaf must have the ability to hash
 /// itself. The associated combine_hash method is used create a parent hash
 /// from two child hashes.
-pub trait HashableElement<H: MerkleHash> {
+///
+/// I made the associated functions operate on this class instead of demanding
+/// that such functions exist on the MerkleHash class so that client libraries
+/// can use arbitrary third-party types (so long as they are clonable) as hashes.
+pub trait HashableElement<H: MerkleHash>: Sized {
     /// Calculate the hash of this element
     fn merkle_hash(&self) -> H;
+
+    /// Write this element to a writer.
+    fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
+
+    /// Read an element from a reader.
+    fn read<R: io::Read>(reader: &mut R) -> io::Result<Self>;
+
     /// Hash two child hashes together to calculate the hash of the
     /// new parent
     fn combine_hash(left: &H, right: &H) -> H;
@@ -42,7 +54,7 @@ where
     for<'a> &'a Self: IntoIterator,
 {
     /// Deserialize the Merkle tree from a reader.
-    fn read<R: io::Read>(&self, reader: &mut R) -> io::Result<Box<Self>>;
+    fn read<R: io::Read>(reader: &mut R) -> io::Result<Box<Self>>;
 
     /// Insert the new leaf element into the tree, and update all hashes.
     fn add(&mut self, element: T);
@@ -55,7 +67,7 @@ where
 
     /// Calculate what the root hash was at the time the tree contained
     /// `past_size` elements.
-    fn past_root(&self, past_size: usize) -> H;
+    fn past_root(&self, past_size: usize) -> Option<H>;
 
     /// Construct the proof that the leaf node at `position` exists.
     ///
