@@ -11,29 +11,29 @@ use std::io;
 /// A node in the Vector based merkle tree. Leafs hold an element,
 /// Internals hold a hash, and Empty is... yeah.
 #[derive(Debug)]
-enum Node<H: MerkleHash, T: HashableElement<H>> {
+enum Node<T: HashableElement> {
     Leaf(T),
-    Internal(H),
+    Internal(T::Hash),
     Empty,
 }
 
-impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
+impl<T: HashableElement> Node<T> {
     // Helper function to generate an internal node from the left and right
     // child hashes
-    fn from_hashes(left: &H, right: &H) -> Self {
+    fn from_hashes(left: &T::Hash, right: &T::Hash) -> Self {
         Node::Internal(T::combine_hash(&left, &right))
     }
 }
 
 // Iterator over references to the elements in the tree. Only the leaf
 // nodes are iterated.
-pub struct VectorLeafIterator<'a, H: MerkleHash, T: HashableElement<H>> {
-    node_iter: std::iter::Skip<std::collections::vec_deque::Iter<'a, Node<H, T>>>,
+pub struct VectorLeafIterator<'a, T: HashableElement> {
+    node_iter: std::iter::Skip<std::collections::vec_deque::Iter<'a, Node<T>>>,
 }
 
-impl<'a, H: MerkleHash, T: HashableElement<H>> VectorLeafIterator<'a, H, T> {
+impl<'a, T: HashableElement> VectorLeafIterator<'a, T> {
     // Construct a new iterator using a reference to the nodes in a VectorMerkleTree
-    fn new(nodes: &'a VecDeque<Node<H, T>>) -> VectorLeafIterator<'a, H, T> {
+    fn new(nodes: &'a VecDeque<Node<T>>) -> VectorLeafIterator<'a, T> {
         let first_leaf_index = if nodes.len() > 0 {
             first_leaf(nodes.len())
         } else {
@@ -44,7 +44,7 @@ impl<'a, H: MerkleHash, T: HashableElement<H>> VectorLeafIterator<'a, H, T> {
     }
 }
 
-impl<'a, H: MerkleHash, T: HashableElement<H>> Iterator for VectorLeafIterator<'a, H, T> {
+impl<'a, T: HashableElement> Iterator for VectorLeafIterator<'a, T> {
     type Item = &'a T;
     // Unwrap the leaf node at the iterator's cursor position and return a
     // reference to it.
@@ -81,12 +81,12 @@ impl<'a, H: MerkleHash, T: HashableElement<H>> Iterator for VectorLeafIterator<'
 ///  *  nearly half the tree will usually contain empty nodes
 ///  *  related nodes for a given authentication path are scattered throughout
 ///     the array
-pub struct VectorMerkleTree<H: MerkleHash, T: HashableElement<H>> {
-    nodes: VecDeque<Node<H, T>>,
+pub struct VectorMerkleTree<T: HashableElement> {
+    nodes: VecDeque<Node<T>>,
     tree_depth: usize,
 }
 
-impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
+impl<T: HashableElement> VectorMerkleTree<T> {
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
     pub fn new() -> Box<Self> {
@@ -186,7 +186,7 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
     /// Extract the hash from a leaf or internal node.
     ///
     /// Returns None if the position is invalid or empty
-    fn extract_hash(&self, position: usize) -> Option<H> {
+    fn extract_hash(&self, position: usize) -> Option<T::Hash> {
         match self.nodes.get(position) {
             None => None,
             Some(Node::Empty) => None,
@@ -196,7 +196,8 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
     }
 }
 
-impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree<H, T> {
+impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
+    type Element = T;
     /// Load a merkle tree from a reader and return a box pointer to it
     fn read<R: io::Read>(reader: &mut R) -> io::Result<Box<Self>> {
         let tree_depth = reader.read_u8()?;
@@ -240,7 +241,7 @@ impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree
     }
 
     /// The current root hash of the tree.
-    fn root_hash(&self) -> Option<H> {
+    fn root_hash(&self) -> Option<T::Hash> {
         self.extract_hash(0).map(|h| {
             let extra_levels = self.tree_depth - num_levels(self.nodes.len());
             let mut cur = h;
@@ -252,7 +253,7 @@ impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree
     }
 
     /// What was the root of the tree when it had past_size leaf nodes
-    fn past_root(&self, past_size: usize) -> Option<H> {
+    fn past_root(&self, past_size: usize) -> Option<T::Hash> {
         if self.nodes.len() == 0 || past_size > self.len() {
             return None;
         }
@@ -288,7 +289,7 @@ impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree
     /// In this implementation, we guarantee that the witness_path is
     /// tree_depth levels deep by repeatedly hashing the
     /// last root_hash with itself.
-    fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<H>>> {
+    fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<T::Hash>>> {
         if self.len() == 0 || position >= self.len() {
             return None;
         }
@@ -336,9 +337,9 @@ impl<H: MerkleHash, T: HashableElement<H>> MerkleTree<H, T> for VectorMerkleTree
     }
 }
 
-impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkleTree<H, T> {
+impl<'a, T: HashableElement> IntoIterator for &'a VectorMerkleTree<T> {
     type Item = &'a T;
-    type IntoIter = VectorLeafIterator<'a, H, T>;
+    type IntoIter = VectorLeafIterator<'a, T>;
 
     /// Allow a for..in over the tree. This iterates references to the tree nodes.
     /// It can only be called on a &VectorMerkleTree.
@@ -411,7 +412,8 @@ mod tests {
     /// Fake hashable element that just concatenates strings so it is easy to
     /// test that the correct values are output. It's weird cause the hashes are
     /// also strings. Probably best to ignore this impl and just read the tests!
-    impl HashableElement<String> for String {
+    impl HashableElement for String {
+        type Hash = String;
         fn merkle_hash(&self) -> Self {
             (*self).clone()
         }
@@ -834,7 +836,7 @@ mod tests {
             .expect("should be able to write bytes.");
         println!("{:?}", bytes);
 
-        let read_back_tree: Box<VectorMerkleTree<String, String>> =
+        let read_back_tree: Box<VectorMerkleTree<String>> =
             VectorMerkleTree::read(&mut bytes[..].as_ref()).expect("should be able to read bytes.");
 
         let mut bytes_again = vec![];
