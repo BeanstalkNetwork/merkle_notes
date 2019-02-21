@@ -1,9 +1,15 @@
+/// Implementation of the MerkleTree API based on storing the whole works in
+/// a vector (actually, I used a deque, it's not quite as inefficient)
+/// as a complete binary tree. This is dreadfully inefficient, but
+/// it was a quick way to get an API implementation up and running.
 extern crate byteorder;
 use super::{HashableElement, MerkleHash, MerkleTree, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
 
+/// A node in the Vector based merkle tree. Leafs hold an element,
+/// Internals hold a hash, and Empty is... yeah.
 #[derive(Debug)]
 enum Node<H: MerkleHash, T: HashableElement<H>> {
     Leaf(T),
@@ -12,16 +18,21 @@ enum Node<H: MerkleHash, T: HashableElement<H>> {
 }
 
 impl<H: MerkleHash, T: HashableElement<H>> Node<H, T> {
+    // Helper function to generate an internal node from the left and right
+    // child hashes
     fn from_hashes(left: &H, right: &H) -> Self {
         Node::Internal(T::combine_hash(&left, &right))
     }
 }
 
+// Iterator over references to the elements in the tree. Only the leaf
+// nodes are iterated.
 pub struct VectorLeafIterator<'a, H: MerkleHash, T: HashableElement<H>> {
     node_iter: std::iter::Skip<std::collections::vec_deque::Iter<'a, Node<H, T>>>,
 }
 
 impl<'a, H: MerkleHash, T: HashableElement<H>> VectorLeafIterator<'a, H, T> {
+    // Construct a new iterator using a reference to the nodes in a VectorMerkleTree
     fn new(nodes: &'a VecDeque<Node<H, T>>) -> VectorLeafIterator<'a, H, T> {
         let first_leaf_index = if nodes.len() > 0 {
             first_leaf(nodes.len())
@@ -32,8 +43,15 @@ impl<'a, H: MerkleHash, T: HashableElement<H>> VectorLeafIterator<'a, H, T> {
         VectorLeafIterator { node_iter }
     }
 }
+
 impl<'a, H: MerkleHash, T: HashableElement<H>> Iterator for VectorLeafIterator<'a, H, T> {
     type Item = &'a T;
+    // Unwrap the leaf node at the iterator's cursor position and return a
+    // reference to it.
+    //
+    // # Panics:
+    //  *  If the tree is in an invalid structure and a node pulled from it is
+    //     not a leaf
     fn next(&mut self) -> Option<Self::Item> {
         self.node_iter.next().map(|node| {
             if let Node::Leaf(ref item) = node {
@@ -159,8 +177,6 @@ impl<H: MerkleHash, T: HashableElement<H>> VectorMerkleTree<H, T> {
 
             current_position = parent_position;
         }
-
-        //let parent_position = parent_po
     }
 
     fn is_empty(&self) -> bool {
@@ -324,6 +340,8 @@ impl<'a, H: MerkleHash, T: HashableElement<H>> IntoIterator for &'a VectorMerkle
     type Item = &'a T;
     type IntoIter = VectorLeafIterator<'a, H, T>;
 
+    /// Allow a for..in over the tree. This iterates references to the tree nodes.
+    /// It can only be called on a &VectorMerkleTree.
     fn into_iter(self) -> Self::IntoIter {
         VectorLeafIterator::new(&self.nodes)
     }
@@ -912,24 +930,3 @@ mod tests {
         assert_eq!(parent_index(num_nodes), 15);
     }
 }
-
-/*
-Complete binary tree math:
- *  Number of levels: floor(log2(num_nodes)) + 1
- *  Number of internal nodes: (2**num_levels) / 2 - 1
- *  Number of leaves: num_nodes - num_internal
- *  Am I currently a complete binary tree?
-     * num_nodes + 1 is a power of two
- *  If my index is:
-     * 0 -> I am root
-     * odd -> I am a left child
-     * even -> I am a right child
- *  My sibling's index is:
-     *  my_index + 1 if I am odd
-     *  my_index - 1 if I am even
- *  My children's indices are:
-     * left child: (my_index + 1) * 2 - 1
-     * right child: (my_index + 1) * 2
- *  My parent's index is:
-     * ceil(my_index / 2) -1
-*/
