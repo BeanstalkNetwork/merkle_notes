@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::io;
 
 pub mod vector;
@@ -11,9 +12,9 @@ extern crate assert_matches;
 /// point on an elliptic curve.
 ///
 /// Any clonable element can be used as a MerkleHash without an adapter (for now)
-pub trait MerkleHash: Clone {}
+pub trait MerkleHash: Clone + Debug {}
 
-impl<T> MerkleHash for T where T: Clone {}
+impl<T> MerkleHash for T where T: Clone + Debug {}
 
 /// Witness to a specific node in an authentication path.
 ///
@@ -39,13 +40,28 @@ pub trait HashableElement: Sized {
 
     /// Write this element to a writer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
+}
+
+/// A factory for working with HashableElements. Specifically, it can read an
+/// element from a reader stream, and it can hash two elements together.
+///
+/// Having this as a separate trait makes it possible to initialize an
+/// implementing struct with state that is needed for reading or hashing.
+///
+/// (In sapling-crypto, this would be the params for a jubjub curve)
+pub trait MerkleHasher {
+    type Element: HashableElement;
 
     /// Read an element from a reader.
-    fn read<R: io::Read>(reader: &mut R) -> io::Result<Self>;
+    fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<Self::Element>;
 
     /// Hash two child hashes together to calculate the hash of the
     /// new parent
-    fn combine_hash(left: &Self::Hash, right: &Self::Hash) -> Self::Hash;
+    fn combine_hash(
+        &self,
+        left: &<Self::Element as HashableElement>::Hash,
+        right: &<Self::Element as HashableElement>::Hash,
+    ) -> <Self::Element as HashableElement>::Hash;
 }
 
 /// Interface for an append-only Merkle tree. The methods it supports are
@@ -55,22 +71,32 @@ pub trait MerkleTree
 where
     for<'a> &'a Self: IntoIterator,
 {
-    type Element: HashableElement;
+    type Hasher: MerkleHasher;
+
+    /// Construct a new, empty merkle tree on the heap that uses the provided
+    /// hasher to calculate hashes and load elements
+    fn new(hasher: Self::Hasher) -> Box<Self>;
+
     /// Deserialize the Merkle tree from a reader.
-    fn read<R: io::Read>(reader: &mut R) -> io::Result<Box<Self>>;
+    fn read<R: io::Read>(hasher: Self::Hasher, reader: &mut R) -> io::Result<Box<Self>>;
 
     /// Insert the new leaf element into the tree, and update all hashes.
-    fn add(&mut self, element: Self::Element);
+    fn add(&mut self, element: <Self::Hasher as MerkleHasher>::Element);
 
     /// Get the number of leaf nodes in the tree.
     fn len(&self) -> usize;
 
     /// Get the hash of the current root element in the tree.
-    fn root_hash(&self) -> Option<<Self::Element as HashableElement>::Hash>;
+    fn root_hash(
+        &self,
+    ) -> Option<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>;
 
     /// Calculate what the root hash was at the time the tree contained
     /// `past_size` elements.
-    fn past_root(&self, past_size: usize) -> Option<<Self::Element as HashableElement>::Hash>;
+    fn past_root(
+        &self,
+        past_size: usize,
+    ) -> Option<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>;
 
     /// Construct the proof that the leaf node at `position` exists.
     ///
@@ -85,7 +111,7 @@ where
     fn witness_path(
         &self,
         position: usize,
-    ) -> Option<Vec<WitnessNode<<Self::Element as HashableElement>::Hash>>>;
+    ) -> Option<Vec<WitnessNode<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>>>;
 
     /// Serialize the Merkle tree to a writer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;

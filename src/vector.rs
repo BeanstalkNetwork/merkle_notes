@@ -3,7 +3,7 @@
 /// as a complete binary tree. This is dreadfully inefficient, but
 /// it was a quick way to get an API implementation up and running.
 extern crate byteorder;
-use super::{HashableElement, MerkleTree, WitnessNode};
+use super::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
@@ -11,27 +11,30 @@ use std::io;
 /// A node in the Vector based merkle tree. Leafs hold an element,
 /// Internals hold a hash, and Empty is... yeah.
 #[derive(Debug)]
-enum Node<T: HashableElement> {
-    Leaf(T),
-    Internal(T::Hash),
+enum Node<T: MerkleHasher> {
+    Leaf(T::Element),
+    Internal(<T::Element as HashableElement>::Hash),
     Empty,
 }
 
-impl<T: HashableElement> Node<T> {
-    // Helper function to generate an internal node from the left and right
-    // child hashes
-    fn from_hashes(left: &T::Hash, right: &T::Hash) -> Self {
-        Node::Internal(T::combine_hash(&left, &right))
-    }
-}
+// impl<T: MerkleHasher> Node<T> {
+//     // Helper function to generate an internal node from the left and right
+//     // child hashes
+//     fn from_hashes(
+//         left: &<T::Element as HashableElement>::Hash,
+//         right: &<T::Element as HashableElement>::Hash,
+//     ) -> Self {
+//         Node::Internal(T::combine_hash(&left, &right))
+//     }
+// }
 
 // Iterator over references to the elements in the tree. Only the leaf
 // nodes are iterated.
-pub struct VectorLeafIterator<'a, T: HashableElement> {
+pub struct VectorLeafIterator<'a, T: MerkleHasher> {
     node_iter: std::iter::Skip<std::collections::vec_deque::Iter<'a, Node<T>>>,
 }
 
-impl<'a, T: HashableElement> VectorLeafIterator<'a, T> {
+impl<'a, T: MerkleHasher> VectorLeafIterator<'a, T> {
     // Construct a new iterator using a reference to the nodes in a VectorMerkleTree
     fn new(nodes: &'a VecDeque<Node<T>>) -> VectorLeafIterator<'a, T> {
         let first_leaf_index = if nodes.len() > 0 {
@@ -44,8 +47,8 @@ impl<'a, T: HashableElement> VectorLeafIterator<'a, T> {
     }
 }
 
-impl<'a, T: HashableElement> Iterator for VectorLeafIterator<'a, T> {
-    type Item = &'a T;
+impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
+    type Item = &'a T::Element;
     // Unwrap the leaf node at the iterator's cursor position and return a
     // reference to it.
     //
@@ -81,23 +84,19 @@ impl<'a, T: HashableElement> Iterator for VectorLeafIterator<'a, T> {
 ///  *  nearly half the tree will usually contain empty nodes
 ///  *  related nodes for a given authentication path are scattered throughout
 ///     the array
-pub struct VectorMerkleTree<T: HashableElement> {
+pub struct VectorMerkleTree<T: MerkleHasher> {
     nodes: VecDeque<Node<T>>,
     tree_depth: usize,
+    hasher: T,
 }
 
-impl<T: HashableElement> VectorMerkleTree<T> {
-    /// Construct a new, empty merkle tree on the heap and return a Box pointer
-    /// to it.
-    pub fn new() -> Box<Self> {
-        VectorMerkleTree::new_with_size(32)
-    }
-
+impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// Used for simpler unit tests
-    fn new_with_size(tree_depth: usize) -> Box<Self> {
+    fn new_with_size(hasher: T, tree_depth: usize) -> Box<Self> {
         Box::new(VectorMerkleTree {
             nodes: VecDeque::new(),
             tree_depth,
+            hasher,
         })
     }
 
@@ -105,7 +104,7 @@ impl<T: HashableElement> VectorMerkleTree<T> {
     /// that everything needs to be moved around and hashes need to be
     /// recalculated. The garbage in this method is the whole reason a vector
     /// based complete binary tree implementation is inefficient.
-    fn rehash_all_levels(&mut self, element: T) {
+    fn rehash_all_levels(&mut self, element: T::Element) {
         let mut new_vec = VecDeque::new();
         new_vec.push_front(Node::Leaf(element));
 
@@ -133,9 +132,9 @@ impl<T: HashableElement> VectorMerkleTree<T> {
                 self.extract_hash(left_child_in_nodes + 1),
             ) {
                 (None, None) => Node::Empty,
-                (Some(ref hash), None) => Node::from_hashes(hash, hash),
+                (Some(ref hash), None) => Node::Internal(self.hasher.combine_hash(hash, hash)),
                 (Some(ref left_hash), Some(ref right_hash)) => {
-                    Node::from_hashes(left_hash, right_hash)
+                    Node::Internal(self.hasher.combine_hash(left_hash, right_hash))
                 }
                 (_, _) => panic!("Invalid tree structure"),
             };
@@ -164,9 +163,9 @@ impl<T: HashableElement> VectorMerkleTree<T> {
             }
 
             let parent_hash = match (left, right) {
-                (Some(ref hash), None) => T::combine_hash(hash, hash),
+                (Some(ref hash), None) => self.hasher.combine_hash(hash, hash),
                 (Some(ref left_hash), Some(ref right_hash)) => {
-                    T::combine_hash(left_hash, right_hash)
+                    self.hasher.combine_hash(left_hash, right_hash)
                 }
                 (_, _) => {
                     panic!("Invalid tree structure");
@@ -186,7 +185,7 @@ impl<T: HashableElement> VectorMerkleTree<T> {
     /// Extract the hash from a leaf or internal node.
     ///
     /// Returns None if the position is invalid or empty
-    fn extract_hash(&self, position: usize) -> Option<T::Hash> {
+    fn extract_hash(&self, position: usize) -> Option<<T::Element as HashableElement>::Hash> {
         match self.nodes.get(position) {
             None => None,
             Some(Node::Empty) => None,
@@ -196,15 +195,22 @@ impl<T: HashableElement> VectorMerkleTree<T> {
     }
 }
 
-impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
-    type Element = T;
+impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
+    type Hasher = T;
+
+    /// Construct a new, empty merkle tree on the heap and return a Box pointer
+    /// to it.
+    fn new(hasher: T) -> Box<Self> {
+        VectorMerkleTree::new_with_size(hasher, 32)
+    }
+
     /// Load a merkle tree from a reader and return a box pointer to it
-    fn read<R: io::Read>(reader: &mut R) -> io::Result<Box<Self>> {
+    fn read<R: io::Read>(hasher: T, reader: &mut R) -> io::Result<Box<Self>> {
         let tree_depth = reader.read_u8()?;
         let num_nodes = reader.read_u32::<LittleEndian>()?;
-        let mut tree = VectorMerkleTree::new_with_size(tree_depth as usize);
+        let mut tree = VectorMerkleTree::new_with_size(hasher, tree_depth as usize);
         for _ in 0..num_nodes {
-            tree.add(T::read(reader)?);
+            tree.add(tree.hasher.read_element(reader)?);
         }
         Ok(tree)
     }
@@ -217,7 +223,7 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
     ///      *  then allocate a new vector and compute all new hashes
     ///  *  otherwise
     ///      *  append an element and update all its parent hashes
-    fn add(&mut self, element: T) {
+    fn add(&mut self, element: T::Element) {
         if self.is_empty() {
             self.nodes.push_back(Node::Leaf(element));
         } else if is_complete(self.nodes.len()) {
@@ -241,19 +247,19 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
     }
 
     /// The current root hash of the tree.
-    fn root_hash(&self) -> Option<T::Hash> {
+    fn root_hash(&self) -> Option<<T::Element as HashableElement>::Hash> {
         self.extract_hash(0).map(|h| {
             let extra_levels = self.tree_depth - num_levels(self.nodes.len());
             let mut cur = h;
             for _ in 0..extra_levels {
-                cur = T::combine_hash(&cur, &cur)
+                cur = self.hasher.combine_hash(&cur, &cur)
             }
             cur
         })
     }
 
     /// What was the root of the tree when it had past_size leaf nodes
-    fn past_root(&self, past_size: usize) -> Option<T::Hash> {
+    fn past_root(&self, past_size: usize) -> Option<<T::Element as HashableElement>::Hash> {
         if self.nodes.len() == 0 || past_size > self.len() {
             return None;
         }
@@ -266,19 +272,19 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
             if is_left_child(cur) {
                 // We're walking the right-most path, so a left child can't
                 // possibly have a sibling
-                current_hash = T::combine_hash(&current_hash, &current_hash);
+                current_hash = self.hasher.combine_hash(&current_hash, &current_hash);
             } else {
                 let sibling_hash = self
                     .extract_hash(cur - 1)
                     .expect("Sibling node must be in tree");
-                current_hash = T::combine_hash(&sibling_hash, &current_hash);
+                current_hash = self.hasher.combine_hash(&sibling_hash, &current_hash);
             }
             cur = parent_index(cur);
             num_levels += 1;
         }
 
         while num_levels < self.tree_depth {
-            current_hash = T::combine_hash(&current_hash, &current_hash);
+            current_hash = self.hasher.combine_hash(&current_hash, &current_hash);
             num_levels += 1;
         }
         return Some(current_hash);
@@ -289,7 +295,10 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
     /// In this implementation, we guarantee that the witness_path is
     /// tree_depth levels deep by repeatedly hashing the
     /// last root_hash with itself.
-    fn witness_path(&self, position: usize) -> Option<Vec<WitnessNode<T::Hash>>> {
+    fn witness_path(
+        &self,
+        position: usize,
+    ) -> Option<Vec<WitnessNode<<T::Element as HashableElement>::Hash>>> {
         if self.len() == 0 || position >= self.len() {
             return None;
         }
@@ -321,7 +330,7 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
         let mut sibling_hash = self.extract_hash(0).expect("Tree couldn't be empty");
         while witnesses.len() < self.tree_depth - 1 {
             witnesses.push(WitnessNode::Left(sibling_hash.clone()));
-            sibling_hash = T::combine_hash(&sibling_hash, &sibling_hash);
+            sibling_hash = self.hasher.combine_hash(&sibling_hash, &sibling_hash);
         }
 
         Some(witnesses)
@@ -337,8 +346,8 @@ impl<T: HashableElement> MerkleTree for VectorMerkleTree<T> {
     }
 }
 
-impl<'a, T: HashableElement> IntoIterator for &'a VectorMerkleTree<T> {
-    type Item = &'a T;
+impl<'a, T: MerkleHasher> IntoIterator for &'a VectorMerkleTree<T> {
+    type Item = &'a T::Element;
     type IntoIter = VectorLeafIterator<'a, T>;
 
     /// Allow a for..in over the tree. This iterates references to the tree nodes.
@@ -403,7 +412,7 @@ mod tests {
     use super::{
         first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
     };
-    use crate::{HashableElement, MerkleTree, WitnessNode};
+    use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
     use byteorder::{ReadBytesExt, WriteBytesExt};
     use std::fmt;
     use std::io;
@@ -418,13 +427,27 @@ mod tests {
             (*self).clone()
         }
 
-        fn combine_hash(left: &String, right: &String) -> Self {
+        fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+            let bytes = self.as_bytes();
+            writer.write_u8(bytes.len() as u8)?;
+            writer.write_all(bytes)?;
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct StringHasher {}
+
+    impl MerkleHasher for StringHasher {
+        type Element = String;
+        fn combine_hash(&self, left: &String, right: &String) -> String {
             (*left).clone() + right
         }
 
-        fn read<R: io::Read>(reader: &mut R) -> io::Result<String> {
+        fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<String> {
             let str_size = reader.read_u8()?;
-            // There has GOT to be a better way to do this...
+            // There has GOT to be a better way to do this
+            // (read str_size bytes into a string)
             let bytes = reader
                 .take(str_size as u64)
                 .bytes()
@@ -437,13 +460,6 @@ mod tests {
                     "shouldn't go wrong",
                 )),
             }
-        }
-
-        fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-            let bytes = self.as_bytes();
-            writer.write_u8(bytes.len() as u8)?;
-            writer.write_all(bytes)?;
-            Ok(())
         }
     }
 
@@ -468,7 +484,7 @@ mod tests {
 
     #[test]
     fn add() {
-        let mut tree = VectorMerkleTree::new();
+        let mut tree = VectorMerkleTree::new(StringHasher {});
         tree.add("a".to_string());
         assert_eq!(tree.nodes.len(), 1);
         assert_matches!(tree.nodes[0], Node::Leaf(ref e) if *e == "a".to_string());
@@ -586,7 +602,7 @@ mod tests {
 
     #[test]
     fn len() {
-        let mut tree = VectorMerkleTree::new();
+        let mut tree = VectorMerkleTree::new(StringHasher {});
         for i in 0..100 {
             assert_eq!(tree.len(), i);
             tree.add("a".to_string());
@@ -595,7 +611,7 @@ mod tests {
 
     #[test]
     fn root_hash_functions() {
-        let mut tree = VectorMerkleTree::new_with_size(5);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
         assert_eq!(tree.root_hash(), None);
         assert_eq!(tree.past_root(1), None);
         tree.add("a".to_string());
@@ -646,7 +662,7 @@ mod tests {
     #[test]
     fn witness_path() {
         // Tree with 4 levels (8 leaves) for easier reasoning
-        let mut tree = VectorMerkleTree::new_with_size(4);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 4);
         assert!(tree.witness_path(0).is_none());
         tree.add("a".to_string());
         assert!(tree.witness_path(1).is_none());
@@ -762,7 +778,7 @@ mod tests {
 
     #[test]
     fn iteration() {
-        let mut tree = VectorMerkleTree::new();
+        let mut tree = VectorMerkleTree::new(StringHasher {});
         let mut iter = tree.into_iter();
         assert_eq!(iter.next(), None);
 
@@ -827,7 +843,7 @@ mod tests {
 
     #[test]
     fn serialization() {
-        let mut tree = VectorMerkleTree::new_with_size(5);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
         for i in 0..12 {
             tree.add(i.to_string());
         }
@@ -836,8 +852,9 @@ mod tests {
             .expect("should be able to write bytes.");
         println!("{:?}", bytes);
 
-        let read_back_tree: Box<VectorMerkleTree<String>> =
-            VectorMerkleTree::read(&mut bytes[..].as_ref()).expect("should be able to read bytes.");
+        let read_back_tree: Box<VectorMerkleTree<StringHasher>> =
+            VectorMerkleTree::read(StringHasher {}, &mut bytes[..].as_ref())
+                .expect("should be able to read bytes.");
 
         let mut bytes_again = vec![];
         println!("{:?}", bytes_again);
