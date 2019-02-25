@@ -17,17 +17,6 @@ enum Node<T: MerkleHasher> {
     Empty,
 }
 
-// impl<T: MerkleHasher> Node<T> {
-//     // Helper function to generate an internal node from the left and right
-//     // child hashes
-//     fn from_hashes(
-//         left: &<T::Element as HashableElement>::Hash,
-//         right: &<T::Element as HashableElement>::Hash,
-//     ) -> Self {
-//         Node::Internal(T::combine_hash(&left, &right))
-//     }
-// }
-
 // Iterator over references to the elements in the tree. Only the leaf
 // nodes are iterated.
 pub struct VectorLeafIterator<'a, T: MerkleHasher> {
@@ -110,6 +99,7 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
 
         let old_vec_length = self.nodes.len();
         let old_leaf_start = first_leaf(old_vec_length);
+        let old_tree_depth = depth_at_index(old_vec_length - 1);
 
         for _ in old_leaf_start..old_vec_length {
             new_vec.push_front(self.nodes.pop_back().expect("There are more nodes"));
@@ -125,6 +115,7 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
         // is full
         let mut index_being_added = old_vec_length - 1;
         loop {
+            let child_node_depth = old_tree_depth - depth_at_index(index_being_added);
             let left_child_in_nodes = left_child_index(index_being_added) - index_being_added - 1;
 
             let new_node = match (
@@ -132,10 +123,13 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
                 self.extract_hash(left_child_in_nodes + 1),
             ) {
                 (None, None) => Node::Empty,
-                (Some(ref hash), None) => Node::Internal(self.hasher.combine_hash(hash, hash)),
-                (Some(ref left_hash), Some(ref right_hash)) => {
-                    Node::Internal(self.hasher.combine_hash(left_hash, right_hash))
+                (Some(ref hash), None) => {
+                    Node::Internal(self.hasher.combine_hash(child_node_depth, hash, hash))
                 }
+                (Some(ref left_hash), Some(ref right_hash)) => Node::Internal(
+                    self.hasher
+                        .combine_hash(child_node_depth, left_hash, right_hash),
+                ),
                 (_, _) => panic!("Invalid tree structure"),
             };
             self.nodes.push_front(new_node);
@@ -149,6 +143,7 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
 
     fn rehash_leaf_path(&mut self) {
         let mut current_position = self.nodes.len() - 1;
+        let mut depth = 0;
 
         while current_position != 0 {
             let parent_position = parent_index(current_position);
@@ -163,9 +158,9 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
             }
 
             let parent_hash = match (left, right) {
-                (Some(ref hash), None) => self.hasher.combine_hash(hash, hash),
+                (Some(ref hash), None) => self.hasher.combine_hash(depth, hash, hash),
                 (Some(ref left_hash), Some(ref right_hash)) => {
-                    self.hasher.combine_hash(left_hash, right_hash)
+                    self.hasher.combine_hash(depth, left_hash, right_hash)
                 }
                 (_, _) => {
                     panic!("Invalid tree structure");
@@ -174,6 +169,7 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
 
             self.nodes[parent_position] = Node::Internal(parent_hash);
 
+            depth += 1;
             current_position = parent_position;
         }
     }
@@ -227,7 +223,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         if self.is_empty() {
             self.nodes.push_back(Node::Leaf(element));
         } else if is_complete(self.nodes.len()) {
-            if num_levels(self.nodes.len()) == self.tree_depth {
+            if depth_at_index(self.nodes.len()) == self.tree_depth + 1 {
                 panic!("Tree is full!");
             }
             self.rehash_all_levels(element);
@@ -249,10 +245,9 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     /// The current root hash of the tree.
     fn root_hash(&self) -> Option<<T::Element as HashableElement>::Hash> {
         self.extract_hash(0).map(|h| {
-            let extra_levels = self.tree_depth - num_levels(self.nodes.len());
             let mut cur = h;
-            for _ in 0..extra_levels {
-                cur = self.hasher.combine_hash(&cur, &cur)
+            for i in depth_at_index(self.nodes.len() - 1)..self.tree_depth {
+                cur = self.hasher.combine_hash(i - 1, &cur, &cur)
             }
             cur
         })
@@ -267,25 +262,31 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         let mut current_hash = self
             .extract_hash(cur)
             .expect("current node must be in tree");
-        let mut num_levels = 1;
+        let mut depth = 0;
         while !is_leftmost_path(cur) {
             if is_left_child(cur) {
                 // We're walking the right-most path, so a left child can't
                 // possibly have a sibling
-                current_hash = self.hasher.combine_hash(&current_hash, &current_hash);
+                current_hash = self
+                    .hasher
+                    .combine_hash(depth, &current_hash, &current_hash);
             } else {
                 let sibling_hash = self
                     .extract_hash(cur - 1)
                     .expect("Sibling node must be in tree");
-                current_hash = self.hasher.combine_hash(&sibling_hash, &current_hash);
+                current_hash = self
+                    .hasher
+                    .combine_hash(depth, &sibling_hash, &current_hash);
             }
             cur = parent_index(cur);
-            num_levels += 1;
+            depth += 1;
         }
 
-        while num_levels < self.tree_depth {
-            current_hash = self.hasher.combine_hash(&current_hash, &current_hash);
-            num_levels += 1;
+        while depth < self.tree_depth - 1 {
+            current_hash = self
+                .hasher
+                .combine_hash(depth, &current_hash, &current_hash);
+            depth += 1;
         }
         return Some(current_hash);
     }
@@ -304,8 +305,10 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         }
         let mut witnesses = vec![];
         let mut current_position = first_leaf(self.nodes.len()) + position;
+        let mut depth = 0;
 
         while current_position != 0 {
+            println!("{} {}", current_position, depth);
             if let Some(my_hash) = self.extract_hash(current_position) {
                 if is_left_child(current_position) {
                     let sibling_hash = self
@@ -322,6 +325,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
                 panic!("Invalid tree structure");
             }
             current_position = parent_index(current_position);
+            depth += 1;
         }
 
         // Assuming the root hash isn't at the top of a tree that has tree_depth
@@ -330,7 +334,10 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         let mut sibling_hash = self.extract_hash(0).expect("Tree couldn't be empty");
         while witnesses.len() < self.tree_depth - 1 {
             witnesses.push(WitnessNode::Left(sibling_hash.clone()));
-            sibling_hash = self.hasher.combine_hash(&sibling_hash, &sibling_hash);
+            sibling_hash = self
+                .hasher
+                .combine_hash(depth, &sibling_hash, &sibling_hash);
+            depth += 1;
         }
 
         Some(witnesses)
@@ -371,22 +378,20 @@ fn is_leftmost_path(my_index: usize) -> bool {
     is_complete(my_index)
 }
 
-/// The number of levels in the tree, including the last unfinished level
+/// The depth of the tree at index num_nodes
+///
 /// floor(log2(num_nodes)) + 1
-fn num_levels(num_nodes: usize) -> usize {
-    if num_nodes == 0 {
-        return 0;
-    }
-    (num_nodes as f32).log2() as usize + 1
+fn depth_at_index(index: usize) -> usize {
+    ((index + 1) as f32).log2() as usize + 1
 }
 
-/// What is the index of the first leaf in the tree?
-/// (basically (2**num_levels) / 2
+/// What is the index of the first leaf a tree with num_nodes elements
+/// (basically (2**depth_at_index) / 2
 fn first_leaf(num_nodes: usize) -> usize {
     if num_nodes == 0 {
         panic!("Tree is empty");
     }
-    (1 << (num_levels(num_nodes) - 1)) - 1
+    (1 << depth_at_index(num_nodes - 1) - 1) - 1
 }
 
 /// Get the index of my node's left child. The right child is always
@@ -410,7 +415,8 @@ fn is_left_child(my_index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        first_leaf, is_complete, is_left_child, num_levels, parent_index, Node, VectorMerkleTree,
+        depth_at_index, first_leaf, is_complete, is_left_child, parent_index, Node,
+        VectorMerkleTree,
     };
     use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
     use byteorder::{ReadBytesExt, WriteBytesExt};
@@ -440,8 +446,8 @@ mod tests {
 
     impl MerkleHasher for StringHasher {
         type Element = String;
-        fn combine_hash(&self, left: &String, right: &String) -> String {
-            (*left).clone() + right
+        fn combine_hash(&self, depth: usize, left: &String, right: &String) -> String {
+            "<".to_string() + &(*left).clone() + "|" + right + "-" + &depth.to_string() + ">"
         }
 
         fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<String> {
@@ -490,34 +496,34 @@ mod tests {
         assert_matches!(tree.nodes[0], Node::Leaf(ref e) if *e == "a".to_string());
         tree.add("b".to_string());
         assert_eq!(tree.nodes.len(), 3);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "ab".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
         assert_matches!(tree.nodes[1], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[2], Node::Leaf(ref e) if *e == "b".to_string());
         tree.add("c".to_string());
         assert_eq!(tree.nodes.len(), 6);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcc".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "cc".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<a|b-0>|<c|c-0>-1>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<c|c-0>".to_string());
         assert_matches!(tree.nodes[3], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[4], Node::Leaf(ref e) if *e == "b".to_string());
         assert_matches!(tree.nodes[5], Node::Leaf(ref e) if *e == "c".to_string());
         tree.add("d".to_string());
         assert_eq!(tree.nodes.len(), 7);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "cd".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
         assert_matches!(tree.nodes[3], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[4], Node::Leaf(ref e) if *e == "b".to_string());
         assert_matches!(tree.nodes[5], Node::Leaf(ref e) if *e == "c".to_string());
         assert_matches!(tree.nodes[6], Node::Leaf(ref e) if *e == "d".to_string());
         tree.add("e".to_string());
         assert_eq!(tree.nodes.len(), 12);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcdeeee".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "eeee".to_string());
-        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "cd".to_string());
-        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "ee".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<<a|b-0>|<c|d-0>-1>|<<e|e-0>|<e|e-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<<e|e-0>|<e|e-0>-1>".to_string());
+        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
+        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "<e|e-0>".to_string());
         assert_matches!(tree.nodes[6], Node::Empty);
         assert_matches!(tree.nodes[7], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[8], Node::Leaf(ref e) if *e == "b".to_string());
@@ -526,12 +532,12 @@ mod tests {
         assert_matches!(tree.nodes[11], Node::Leaf(ref e) if *e == "e".to_string());
         tree.add("f".to_string());
         assert_eq!(tree.nodes.len(), 13);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcdefef".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "efef".to_string());
-        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "cd".to_string());
-        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "ef".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<<a|b-0>|<c|d-0>-1>|<<e|f-0>|<e|f-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<<e|f-0>|<e|f-0>-1>".to_string());
+        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
+        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "<e|f-0>".to_string());
         assert_matches!(tree.nodes[6], Node::Empty);
         assert_matches!(tree.nodes[7], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[8], Node::Leaf(ref e) if *e == "b".to_string());
@@ -541,13 +547,13 @@ mod tests {
         assert_matches!(tree.nodes[12], Node::Leaf(ref e) if *e == "f".to_string());
         tree.add("g".to_string());
         assert_eq!(tree.nodes.len(), 14);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcdefgg".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "efgg".to_string());
-        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "cd".to_string());
-        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "ef".to_string());
-        assert_matches!(tree.nodes[6], Node::Internal(ref e) if *e == "gg".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<<a|b-0>|<c|d-0>-1>|<<e|f-0>|<g|g-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<<e|f-0>|<g|g-0>-1>".to_string());
+        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
+        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "<e|f-0>".to_string());
+        assert_matches!(tree.nodes[6], Node::Internal(ref e) if *e == "<g|g-0>".to_string());
         assert_matches!(tree.nodes[7], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[8], Node::Leaf(ref e) if *e == "b".to_string());
         assert_matches!(tree.nodes[9], Node::Leaf(ref e) if *e == "c".to_string());
@@ -557,13 +563,13 @@ mod tests {
         assert_matches!(tree.nodes[13], Node::Leaf(ref e) if *e == "g".to_string());
         tree.add("h".to_string());
         assert_eq!(tree.nodes.len(), 15);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcdefgh".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "efgh".to_string());
-        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "cd".to_string());
-        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "ef".to_string());
-        assert_matches!(tree.nodes[6], Node::Internal(ref e) if *e == "gh".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<<a|b-0>|<c|d-0>-1>|<<e|f-0>|<g|h-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<<e|f-0>|<g|h-0>-1>".to_string());
+        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
+        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "<e|f-0>".to_string());
+        assert_matches!(tree.nodes[6], Node::Internal(ref e) if *e == "<g|h-0>".to_string());
         assert_matches!(tree.nodes[7], Node::Leaf(ref e) if *e == "a".to_string());
         assert_matches!(tree.nodes[8], Node::Leaf(ref e) if *e == "b".to_string());
         assert_matches!(tree.nodes[9], Node::Leaf(ref e) if *e == "c".to_string());
@@ -574,18 +580,18 @@ mod tests {
         assert_matches!(tree.nodes[14], Node::Leaf(ref e) if *e == "h".to_string());
         tree.add("i".to_string());
         assert_eq!(tree.nodes.len(), 24);
-        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "abcdefghiiiiiiii".to_string());
-        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "abcdefgh".to_string());
-        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "iiiiiiii".to_string());
-        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "abcd".to_string());
-        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "efgh".to_string());
-        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "iiii".to_string());
+        assert_matches!(tree.nodes[0], Node::Internal(ref e) if *e == "<<<<a|b-0>|<c|d-0>-1>|<<e|f-0>|<g|h-0>-1>-2>|<<<i|i-0>|<i|i-0>-1>|<<i|i-0>|<i|i-0>-1>-2>-3>".to_string());
+        assert_matches!(tree.nodes[1], Node::Internal(ref e) if *e == "<<<a|b-0>|<c|d-0>-1>|<<e|f-0>|<g|h-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[2], Node::Internal(ref e) if *e == "<<<i|i-0>|<i|i-0>-1>|<<i|i-0>|<i|i-0>-1>-2>".to_string());
+        assert_matches!(tree.nodes[3], Node::Internal(ref e) if *e == "<<a|b-0>|<c|d-0>-1>".to_string());
+        assert_matches!(tree.nodes[4], Node::Internal(ref e) if *e == "<<e|f-0>|<g|h-0>-1>".to_string());
+        assert_matches!(tree.nodes[5], Node::Internal(ref e) if *e == "<<i|i-0>|<i|i-0>-1>".to_string());
         assert_matches!(tree.nodes[6], Node::Empty);
-        assert_matches!(tree.nodes[7], Node::Internal(ref e) if *e == "ab".to_string());
-        assert_matches!(tree.nodes[8], Node::Internal(ref e) if *e == "cd".to_string());
-        assert_matches!(tree.nodes[9], Node::Internal(ref e) if *e == "ef".to_string());
-        assert_matches!(tree.nodes[10], Node::Internal(ref e) if *e == "gh".to_string());
-        assert_matches!(tree.nodes[11], Node::Internal(ref e) if *e == "ii".to_string());
+        assert_matches!(tree.nodes[7], Node::Internal(ref e) if *e == "<a|b-0>".to_string());
+        assert_matches!(tree.nodes[8], Node::Internal(ref e) if *e == "<c|d-0>".to_string());
+        assert_matches!(tree.nodes[9], Node::Internal(ref e) if *e == "<e|f-0>".to_string());
+        assert_matches!(tree.nodes[10], Node::Internal(ref e) if *e == "<g|h-0>".to_string());
+        assert_matches!(tree.nodes[11], Node::Internal(ref e) if *e == "<i|i-0>".to_string());
         assert_matches!(tree.nodes[12], Node::Empty);
         assert_matches!(tree.nodes[13], Node::Empty);
         assert_matches!(tree.nodes[14], Node::Empty);
@@ -615,47 +621,53 @@ mod tests {
         assert_eq!(tree.root_hash(), None);
         assert_eq!(tree.past_root(1), None);
         tree.add("a".to_string());
-        assert_eq!(tree.root_hash(), Some("aaaaaaaaaaaaaaaa".to_string()));
-        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(
+            tree.root_hash(),
+            Some(
+                "<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>"
+                    .to_string()
+            )
+        );
+        assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
         assert_eq!(tree.past_root(2), None);
         tree.add("b".to_string());
-        assert_eq!(tree.root_hash(), Some("abababababababab".to_string()));
-        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
-        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
         assert_eq!(tree.past_root(3), None);
         tree.add("c".to_string());
-        assert_eq!(tree.root_hash(), Some("abccabccabccabcc".to_string()));
-        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
-        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
-        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
         assert_eq!(tree.past_root(4), None);
         tree.add("d".to_string());
-        assert_eq!(tree.root_hash(), Some("abcdabcdabcdabcd".to_string()));
-        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
-        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
-        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
-        assert_eq!(tree.past_root(4), Some("abcdabcdabcdabcd".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(4), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
         assert_eq!(tree.past_root(5), None);
         for i in 0..12 {
             tree.add(i.to_string());
         }
-        assert_eq!(tree.root_hash(), Some("abcd01234567891011".to_string()));
-        assert_eq!(tree.past_root(1), Some("aaaaaaaaaaaaaaaa".to_string()));
-        assert_eq!(tree.past_root(2), Some("abababababababab".to_string()));
-        assert_eq!(tree.past_root(3), Some("abccabccabccabcc".to_string()));
-        assert_eq!(tree.past_root(4), Some("abcdabcdabcdabcd".to_string()));
-        assert_eq!(tree.past_root(5), Some("abcd0000abcd0000".to_string()));
-        assert_eq!(tree.past_root(6), Some("abcd0101abcd0101".to_string()));
-        assert_eq!(tree.past_root(7), Some("abcd0122abcd0122".to_string()));
-        assert_eq!(tree.past_root(8), Some("abcd0123abcd0123".to_string()));
-        assert_eq!(tree.past_root(9), Some("abcd012344444444".to_string()));
-        assert_eq!(tree.past_root(10), Some("abcd012345454545".to_string()));
-        assert_eq!(tree.past_root(11), Some("abcd012345664566".to_string()));
-        assert_eq!(tree.past_root(12), Some("abcd012345674567".to_string()));
-        assert_eq!(tree.past_root(13), Some("abcd012345678888".to_string()));
-        assert_eq!(tree.past_root(14), Some("abcd012345678989".to_string()));
-        assert_eq!(tree.past_root(15), Some("abcd01234567891010".to_string()));
-        assert_eq!(tree.past_root(16), Some("abcd01234567891011".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(4), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(5), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|0-0>|<0|0-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|0-0>|<0|0-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(6), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<0|1-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<0|1-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(7), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|2-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|2-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(8), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(9), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|4-0>|<4|4-0>-1>|<<4|4-0>|<4|4-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(10), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<4|5-0>-1>|<<4|5-0>|<4|5-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(11), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|6-0>-1>|<<4|5-0>|<6|6-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(12), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<4|5-0>|<6|7-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(13), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|8-0>|<8|8-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(14), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<8|9-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(15), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|10-0>-1>-2>-3>".to_string()));
+        assert_eq!(tree.past_root(16), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
         assert_eq!(tree.past_root(17), None);
     }
 
@@ -670,8 +682,8 @@ mod tests {
             tree.witness_path(0).expect("path exists"),
             vec![
                 WitnessNode::Left("a".to_string()),
-                WitnessNode::Left("aa".to_string()),
-                WitnessNode::Left("aaaa".to_string()),
+                WitnessNode::Left("<a|a-0>".to_string()),
+                WitnessNode::Left("<<a|a-0>|<a|a-0>-1>".to_string()),
             ]
         );
 
@@ -681,16 +693,16 @@ mod tests {
             tree.witness_path(0).expect("path exists"),
             vec![
                 WitnessNode::Left("b".to_string()),
-                WitnessNode::Left("ab".to_string()),
-                WitnessNode::Left("abab".to_string()),
+                WitnessNode::Left("<a|b-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(1).expect("path exists"),
             vec![
                 WitnessNode::Right("a".to_string()),
-                WitnessNode::Left("ab".to_string()),
-                WitnessNode::Left("abab".to_string()),
+                WitnessNode::Left("<a|b-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
             ]
         );
 
@@ -700,24 +712,24 @@ mod tests {
             tree.witness_path(0).expect("path exists"),
             vec![
                 WitnessNode::Left("b".to_string()),
-                WitnessNode::Left("cc".to_string()),
-                WitnessNode::Left("abcc".to_string()),
+                WitnessNode::Left("<c|c-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(1).expect("path exists"),
             vec![
                 WitnessNode::Right("a".to_string()),
-                WitnessNode::Left("cc".to_string()),
-                WitnessNode::Left("abcc".to_string()),
+                WitnessNode::Left("<c|c-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(2).expect("path exists"),
             vec![
                 WitnessNode::Left("c".to_string()),
-                WitnessNode::Right("ab".to_string()),
-                WitnessNode::Left("abcc".to_string()),
+                WitnessNode::Right("<a|b-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
             ]
         );
         tree.add("d".to_string());
@@ -726,8 +738,8 @@ mod tests {
             tree.witness_path(3).expect("path exists"),
             vec![
                 WitnessNode::Right("c".to_string()),
-                WitnessNode::Right("ab".to_string()),
-                WitnessNode::Left("abcd".to_string()),
+                WitnessNode::Right("<a|b-0>".to_string()),
+                WitnessNode::Left("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
         for i in 0..4 {
@@ -738,40 +750,40 @@ mod tests {
             tree.witness_path(3).expect("path exists"),
             vec![
                 WitnessNode::Right("c".to_string()),
-                WitnessNode::Right("ab".to_string()),
-                WitnessNode::Left("0123".to_string()),
+                WitnessNode::Right("<a|b-0>".to_string()),
+                WitnessNode::Left("<<0|1-0>|<2|3-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(4).expect("path exists"),
             vec![
                 WitnessNode::Left("1".to_string()),
-                WitnessNode::Left("23".to_string()),
-                WitnessNode::Right("abcd".to_string()),
+                WitnessNode::Left("<2|3-0>".to_string()),
+                WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(5).expect("path exists"),
             vec![
                 WitnessNode::Right("0".to_string()),
-                WitnessNode::Left("23".to_string()),
-                WitnessNode::Right("abcd".to_string()),
+                WitnessNode::Left("<2|3-0>".to_string()),
+                WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(6).expect("path exists"),
             vec![
                 WitnessNode::Left("3".to_string()),
-                WitnessNode::Right("01".to_string()),
-                WitnessNode::Right("abcd".to_string()),
+                WitnessNode::Right("<0|1-0>".to_string()),
+                WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
         assert_eq!(
             tree.witness_path(7).expect("path exists"),
             vec![
                 WitnessNode::Right("2".to_string()),
-                WitnessNode::Right("01".to_string()),
-                WitnessNode::Right("abcd".to_string()),
+                WitnessNode::Right("<0|1-0>".to_string()),
+                WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
     }
@@ -850,14 +862,12 @@ mod tests {
         let mut bytes = vec![];
         tree.write(&mut bytes)
             .expect("should be able to write bytes.");
-        println!("{:?}", bytes);
 
         let read_back_tree: Box<VectorMerkleTree<StringHasher>> =
             VectorMerkleTree::read(StringHasher {}, &mut bytes[..].as_ref())
                 .expect("should be able to read bytes.");
 
         let mut bytes_again = vec![];
-        println!("{:?}", bytes_again);
         read_back_tree
             .write(&mut bytes_again)
             .expect("should still be able to write bytes.");
@@ -865,87 +875,111 @@ mod tests {
     }
 
     #[test]
+    fn test_depth_at_index() {
+        assert_eq!(depth_at_index(0), 1);
+        assert_eq!(depth_at_index(1), 2);
+        assert_eq!(depth_at_index(2), 2);
+        assert_eq!(depth_at_index(3), 3);
+        assert_eq!(depth_at_index(4), 3);
+        assert_eq!(depth_at_index(5), 3);
+        assert_eq!(depth_at_index(6), 3);
+        assert_eq!(depth_at_index(7), 4);
+        assert_eq!(depth_at_index(8), 4);
+        assert_eq!(depth_at_index(9), 4);
+        assert_eq!(depth_at_index(10), 4);
+        assert_eq!(depth_at_index(11), 4);
+        assert_eq!(depth_at_index(12), 4);
+        assert_eq!(depth_at_index(13), 4);
+        assert_eq!(depth_at_index(14), 4);
+        assert_eq!(depth_at_index(15), 5);
+        assert_eq!(depth_at_index(16), 5);
+        assert_eq!(depth_at_index(30), 5);
+        assert_eq!(depth_at_index(31), 6);
+        assert_eq!(depth_at_index(62), 6);
+        assert_eq!(depth_at_index(63), 7);
+        assert_eq!(depth_at_index(127), 8);
+    }
+
+    #[test]
+    fn test_first_leaf() {
+        assert_eq!(first_leaf(1), 0);
+        assert_eq!(first_leaf(2), 1);
+        assert_eq!(first_leaf(3), 1);
+        assert_eq!(first_leaf(4), 3);
+        assert_eq!(first_leaf(5), 3);
+        assert_eq!(first_leaf(6), 3);
+        assert_eq!(first_leaf(7), 3);
+        assert_eq!(first_leaf(8), 7);
+        assert_eq!(first_leaf(9), 7);
+        assert_eq!(first_leaf(10), 7);
+        assert_eq!(first_leaf(11), 7);
+        assert_eq!(first_leaf(12), 7);
+        assert_eq!(first_leaf(13), 7);
+        assert_eq!(first_leaf(14), 7);
+        assert_eq!(first_leaf(15), 7);
+        assert_eq!(first_leaf(16), 15);
+        assert_eq!(first_leaf(31), 15);
+        assert_eq!(first_leaf(63), 31);
+        assert_eq!(first_leaf(64), 63);
+    }
+
+    #[test]
     fn private_tree_mathy_methods() {
         let mut num_nodes = 0;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 0);
-        // no first_leaf check, it should panic
+        assert_eq!(depth_at_index(num_nodes), 1);
         // no parent_index check, it should panic
 
         num_nodes = 1;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 1);
-        assert_eq!(first_leaf(num_nodes), 0);
         assert_eq!(parent_index(num_nodes), 0);
         assert!(is_left_child(num_nodes));
 
         num_nodes = 2;
         assert!(!is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 2);
-        assert_eq!(first_leaf(num_nodes), 1);
         assert_eq!(parent_index(num_nodes), 0);
         assert!(!is_left_child(num_nodes));
 
         num_nodes = 3;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 2);
-        assert_eq!(first_leaf(num_nodes), 1);
         assert_eq!(parent_index(num_nodes), 1);
 
         num_nodes = 4;
         assert!(!is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 3);
-        assert_eq!(first_leaf(num_nodes), 3);
         assert_eq!(parent_index(num_nodes), 1);
 
         num_nodes = 5;
         assert!(!is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 3);
-        assert_eq!(first_leaf(num_nodes), 3);
         assert_eq!(parent_index(num_nodes), 2);
 
         num_nodes = 6;
         assert!(!is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 3);
-        assert_eq!(first_leaf(num_nodes), 3);
         assert_eq!(parent_index(num_nodes), 2);
 
         num_nodes = 7;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 3);
-        assert_eq!(first_leaf(num_nodes), 3);
         assert_eq!(parent_index(num_nodes), 3);
 
         for _ in 0..7 {
             num_nodes += 1;
             assert!(!is_complete(num_nodes));
-            assert_eq!(num_levels(num_nodes), 4);
-            assert_eq!(first_leaf(num_nodes), 7);
         }
 
         num_nodes = 15;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 4);
-        assert_eq!(first_leaf(num_nodes), 7);
         assert_eq!(parent_index(num_nodes), 7);
 
         for _ in 0..15 {
             num_nodes += 1;
             assert!(!is_complete(num_nodes));
-            assert_eq!(num_levels(num_nodes), 5);
-            assert_eq!(first_leaf(num_nodes), 15);
         }
 
         num_nodes = 31;
         assert!(is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 5);
-        assert_eq!(first_leaf(num_nodes), 15);
         assert_eq!(parent_index(num_nodes), 15);
 
         num_nodes = 32;
         assert!(!is_complete(num_nodes));
-        assert_eq!(num_levels(num_nodes), 6);
-        assert_eq!(first_leaf(num_nodes), 31);
         assert_eq!(parent_index(num_nodes), 15);
     }
 }

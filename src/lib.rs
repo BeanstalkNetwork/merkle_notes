@@ -56,9 +56,14 @@ pub trait MerkleHasher {
     fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<Self::Element>;
 
     /// Hash two child hashes together to calculate the hash of the
-    /// new parent
+    /// new parent.
+    ///
+    /// Depth is the "level" of the nodes within the tree, where the depth when
+    /// hashing two leaves together is zero, when hashing the parents of leaves
+    /// it is 1, and so on.
     fn combine_hash(
         &self,
+        depth: usize,
         left: &<Self::Element as HashableElement>::Hash,
         right: &<Self::Element as HashableElement>::Hash,
     ) -> <Self::Element as HashableElement>::Hash;
