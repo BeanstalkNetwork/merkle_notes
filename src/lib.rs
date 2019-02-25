@@ -16,15 +16,6 @@ pub trait MerkleHash: Clone + Debug {}
 
 impl<T> MerkleHash for T where T: Clone + Debug {}
 
-/// Witness to a specific node in an authentication path.
-///
-/// The Left/Right is the Hash of THIS node, but the MerkleHash at node.0 is
-/// the hash of the SIBLING node.
-pub enum WitnessNode<H: MerkleHash> {
-    Left(H),
-    Right(H),
-}
-
 /// A leaf node in the Merkle tree. Each leaf must have the ability to hash
 /// itself. The associated combine_hash method is used create a parent hash
 /// from two child hashes.
@@ -113,11 +104,25 @@ where
     /// the hash of the child of the root node.
     ///
     /// The root hash is not included in the authentication path.
-    fn witness_path(
+    fn witness(
         &self,
         position: usize,
-    ) -> Option<Vec<WitnessNode<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>>>;
+    ) -> Option<Witness<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>>;
 
     /// Serialize the Merkle tree to a writer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
+}
+
+/// Witness to a specific node in an authentication path.
+///
+/// The Left/Right is the Hash of THIS node, but the MerkleHash at node.0 is
+/// the hash of the SIBLING node.
+pub enum WitnessNode<H: MerkleHash> {
+    Left(H),
+    Right(H),
+}
+
+pub struct Witness<H: MerkleHash> {
+    pub root_hash: H,
+    pub auth_path: Vec<WitnessNode<H>>,
 }
