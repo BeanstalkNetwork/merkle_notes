@@ -296,7 +296,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     /// In this implementation, we guarantee that the witness_path is
     /// tree_depth levels deep by repeatedly hashing the
     /// last root_hash with itself.
-    fn witness(&self, position: usize) -> Option<Witness<<T::Element as HashableElement>::Hash>> {
+    fn witness(&self, position: usize) -> Option<Witness<T>> {
         if self.len() == 0 || position >= self.len() {
             return None;
         }
@@ -672,14 +672,17 @@ mod tests {
 
     #[test]
     fn witness_path() {
+        let hasher = StringHasher {};
         // Tree with 4 levels (8 leaves) for easier reasoning
-        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 4);
+        let mut tree = VectorMerkleTree::new_with_size(hasher, 4);
         assert!(tree.witness(0).is_none());
 
         tree.add("a".to_string());
         assert!(tree.witness(1).is_none());
         let mut expected_root = "<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>";
         let mut witness = tree.witness(0).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"a".to_string()));
+        assert!(!witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -694,6 +697,8 @@ mod tests {
         expected_root = "<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>";
         assert!(tree.witness(2).is_none());
         witness = tree.witness(0).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"a".to_string()));
+        assert!(!witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -704,6 +709,8 @@ mod tests {
             ]
         );
         witness = tree.witness(1).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"b".to_string()));
+        assert!(!witness.verify(&tree.hasher, &"a".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -718,6 +725,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>";
         assert!(tree.witness(3).is_none());
         witness = tree.witness(0).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"a".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -728,6 +736,7 @@ mod tests {
             ]
         );
         witness = tree.witness(1).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
 
         assert_eq!(
@@ -739,6 +748,7 @@ mod tests {
             ]
         );
         witness = tree.witness(2).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"c".to_string()));
         assert_eq!(witness.root_hash, expected_root);
 
         assert_eq!(
@@ -753,6 +763,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>";
         witness = tree.witness(3).expect("path exists");
         assert_eq!(witness.root_hash, expected_root);
+        assert!(witness.verify(&tree.hasher, &"d".to_string()));
         assert!(tree.witness(4).is_none());
         assert_eq!(
             witness.auth_path,
@@ -768,6 +779,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>";
         assert!(tree.witness(8).is_none());
         witness = tree.witness(3).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"d".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -778,6 +790,7 @@ mod tests {
             ]
         );
         witness = tree.witness(4).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"0".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -788,6 +801,7 @@ mod tests {
             ]
         );
         witness = tree.witness(5).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"1".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -798,6 +812,7 @@ mod tests {
             ]
         );
         witness = tree.witness(6).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"2".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,
@@ -808,6 +823,7 @@ mod tests {
             ]
         );
         witness = tree.witness(7).expect("path exists");
+        assert!(witness.verify(&tree.hasher, &"3".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
             witness.auth_path,

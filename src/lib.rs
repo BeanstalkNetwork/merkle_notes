@@ -12,9 +12,9 @@ extern crate assert_matches;
 /// point on an elliptic curve.
 ///
 /// Any clonable element can be used as a MerkleHash without an adapter (for now)
-pub trait MerkleHash: Clone + Debug {}
+pub trait MerkleHash: Clone + PartialEq + Debug {}
 
-impl<T> MerkleHash for T where T: Clone + Debug {}
+impl<T> MerkleHash for T where T: Clone + PartialEq + Debug {}
 
 /// A leaf node in the Merkle tree. Each leaf must have the ability to hash
 /// itself. The associated combine_hash method is used create a parent hash
@@ -104,10 +104,7 @@ where
     /// the hash of the child of the root node.
     ///
     /// The root hash is not included in the authentication path.
-    fn witness(
-        &self,
-        position: usize,
-    ) -> Option<Witness<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>>;
+    fn witness(&self, position: usize) -> Option<Witness<Self::Hasher>>;
 
     /// Serialize the Merkle tree to a writer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
@@ -125,7 +122,24 @@ pub enum WitnessNode<H: MerkleHash> {
 /// Commitment that a leaf node exists in the tree, with an authentication path
 /// and the root_hash of the tree at the time the authentication_path was
 /// calculated.
-pub struct Witness<H: MerkleHash> {
-    pub root_hash: H,
-    pub auth_path: Vec<WitnessNode<H>>,
+pub struct Witness<H: MerkleHasher> {
+    pub root_hash: <H::Element as HashableElement>::Hash,
+    pub auth_path: Vec<WitnessNode<<H::Element as HashableElement>::Hash>>,
+}
+
+impl<H: MerkleHasher> Witness<H> {
+    /// verify that the root hash and authentication path on this witness is a
+    /// valid confirmation that the given element exists at this point in the
+    /// tree.
+    pub fn verify(&self, hasher: &H, element: &H::Element) -> bool {
+        let mut cur_hash = element.merkle_hash();
+        for (i, node) in self.auth_path.iter().enumerate() {
+            cur_hash = match node {
+                WitnessNode::Left(ref right_hash) => hasher.combine_hash(i, &cur_hash, right_hash),
+                WitnessNode::Right(ref left_hash) => hasher.combine_hash(i, left_hash, &cur_hash),
+            }
+        }
+
+        cur_hash == self.root_hash
+    }
 }
