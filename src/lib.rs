@@ -131,8 +131,8 @@ impl<H: MerkleHasher> Witness<H> {
     /// verify that the root hash and authentication path on this witness is a
     /// valid confirmation that the given element exists at this point in the
     /// tree.
-    pub fn verify(&self, hasher: &H, element: &H::Element) -> bool {
-        let mut cur_hash = element.merkle_hash();
+    pub fn verify(&self, hasher: &H, my_hash: &<H::Element as HashableElement>::Hash) -> bool {
+        let mut cur_hash = (*my_hash).clone();
         for (i, node) in self.auth_path.iter().enumerate() {
             cur_hash = match node {
                 WitnessNode::Left(ref right_hash) => hasher.combine_hash(i, &cur_hash, right_hash),
