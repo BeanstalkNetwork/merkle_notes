@@ -122,6 +122,9 @@ pub enum WitnessNode<H: MerkleHash> {
     Right(H),
 }
 
+/// Commitment that a leaf node exists in the tree, with an authentication path
+/// and the root_hash of the tree at the time the authentication_path was
+/// calculated.
 pub struct Witness<H: MerkleHash> {
     pub root_hash: H,
     pub auth_path: Vec<WitnessNode<H>>,
