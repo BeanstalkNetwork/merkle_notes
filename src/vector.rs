@@ -64,8 +64,11 @@ impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
 /// implementation up and running for testing external trees as soon
 /// as possible.
 ///
-/// Treats the tree as fixed-height with 32 levels. Calculating the hash of an
-/// element with an empty right child is done by hashing it with itself.
+/// Treats the tree as fixed-height with 33 levels, including the root node. This
+/// causes the auth_path to have 32 levels, which is what sapling expects (
+/// apparently their `tree_depth` does not include the root node)
+/// Calculating the hash of an element with an empty right child is
+/// done by hashing it with itself.
 ///
 /// Design inefficiencies:
 ///  *  Adding a new node when the tree is full requires a bunch of insertions
@@ -197,7 +200,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
     fn new(hasher: T) -> Box<Self> {
-        VectorMerkleTree::new_with_size(hasher, 32)
+        VectorMerkleTree::new_with_size(hasher, 33)
     }
 
     /// Load a merkle tree from a reader and return a box pointer to it
@@ -418,7 +421,7 @@ mod tests {
         VectorMerkleTree,
     };
     use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
-    use byteorder::{ReadBytesExt, WriteBytesExt};
+    use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use std::fmt;
     use std::io;
     use std::io::Read;
@@ -484,6 +487,35 @@ mod tests {
                 (WitnessNode::Right(a), WitnessNode::Right(b)) => a == b,
                 (_, _) => false,
             }
+        }
+    }
+
+    /// Fake hashable element that just counts the number of levels.
+    /// I made this because man, 32 levels of StringHasher is a lot of bytes.
+    /// Like, crashed my computer bytes.
+    impl HashableElement for u64 {
+        type Hash = u64;
+        fn merkle_hash(&self) -> Self {
+            *self
+        }
+
+        fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+            writer.write_u64::<LittleEndian>(*self)?;
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct CountHasher {}
+
+    impl MerkleHasher for CountHasher {
+        type Element = u64;
+        fn combine_hash(&self, _depth: usize, left: &u64, _right: &u64) -> u64 {
+            left + 1
+        }
+
+        fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<u64> {
+            reader.read_u64::<LittleEndian>()
         }
     }
 
@@ -1028,5 +1060,14 @@ mod tests {
         num_nodes = 32;
         assert!(!is_complete(num_nodes));
         assert_eq!(parent_index(num_nodes), 15);
+    }
+
+    #[test]
+    fn default_authpath_len() {
+        let mut tree = VectorMerkleTree::new(CountHasher {});
+        tree.add(1);
+        let witness = tree.witness(0).expect("node exists");
+        assert_eq!(witness.root_hash, 33);
+        assert_eq!(witness.auth_path.len(), 32);
     }
 }
