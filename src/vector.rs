@@ -469,6 +469,14 @@ mod tests {
                 )),
             }
         }
+
+        fn read_hash<R: io::Read>(&self, _reader: &mut R) -> io::Result<String> {
+            panic!("Not needed for the unit test suite");
+        }
+
+        fn write_hash<W: io::Write>(&self, _hash: &String, _writer: &mut W) -> io::Result<()> {
+            panic!("Not needed for the unit test suite");
+        }
     }
 
     impl fmt::Debug for WitnessNode<String> {
@@ -516,6 +524,14 @@ mod tests {
 
         fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<u64> {
             reader.read_u64::<LittleEndian>()
+        }
+
+        fn read_hash<R: io::Read>(&self, _reader: &mut R) -> io::Result<u64> {
+            panic!("Not needed for the unit test suite");
+        }
+
+        fn write_hash<W: io::Write>(&self, _hash: &u64, _writer: &mut W) -> io::Result<()> {
+            panic!("Not needed for the unit test suite");
         }
     }
 

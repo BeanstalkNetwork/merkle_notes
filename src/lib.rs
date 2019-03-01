@@ -46,6 +46,26 @@ pub trait MerkleHasher {
     /// Read an element from a reader.
     fn read_element<R: io::Read>(&self, reader: &mut R) -> io::Result<Self::Element>;
 
+    /// Read a hash from a reader.
+    fn read_hash<R: io::Read>(
+        &self,
+        reader: &mut R,
+    ) -> io::Result<<Self::Element as HashableElement>::Hash>;
+
+    /// Write a hash to the writer.
+    // In an ideal world, this would live on
+    // the MerkleHash trait. However, in Beanstalk's real world, MerkleHash
+    // is implemented by a trait in a crate we don't control. Instead of going
+    // to the trouble of wrapping it with the NewType pattern, I just add this
+    // bit of ineligance here...
+    fn write_hash<W: io::Write>(
+        &self,
+        hash: &<Self::Element as HashableElement>::Hash,
+        writer: &mut W,
+    ) -> io::Result<()>;
+
+    /// Write a hash to a writer
+
     /// Hash two child hashes together to calculate the hash of the
     /// new parent.
     ///
