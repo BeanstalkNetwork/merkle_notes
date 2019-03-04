@@ -23,7 +23,7 @@ impl<T> MerkleHash for T where T: Clone + PartialEq + Debug {}
 /// I made the associated functions operate on this class instead of demanding
 /// that such functions exist on the MerkleHash class so that client libraries
 /// can use arbitrary third-party types (so long as they are clonable) as hashes.
-pub trait HashableElement: Sized {
+pub trait HashableElement: Clone {
     type Hash: MerkleHash;
 
     /// Calculate the hash of this element
@@ -85,7 +85,7 @@ pub trait MerkleHasher {
 /// represents one note. There may be other use cases, however.
 pub trait MerkleTree
 where
-    for<'a> &'a Self: IntoIterator,
+    for<'a> &'a Self: IntoIterator<Item = <Self::Hasher as MerkleHasher>::Element>,
 {
     type Hasher: MerkleHasher;
 

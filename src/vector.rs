@@ -37,7 +37,7 @@ impl<'a, T: MerkleHasher> VectorLeafIterator<'a, T> {
 }
 
 impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
-    type Item = &'a T::Element;
+    type Item = T::Element;
     // Unwrap the leaf node at the iterator's cursor position and return a
     // reference to it.
     //
@@ -47,7 +47,7 @@ impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.node_iter.next().map(|node| {
             if let Node::Leaf(ref item) = node {
-                item
+                item.clone()
             } else {
                 panic!("Expect all leaf nodes in order");
             }
@@ -356,7 +356,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
 }
 
 impl<'a, T: MerkleHasher> IntoIterator for &'a VectorMerkleTree<T> {
-    type Item = &'a T::Element;
+    type Item = T::Element;
     type IntoIter = VectorLeafIterator<'a, T>;
 
     /// Allow a for..in over the tree. This iterates references to the tree nodes.
@@ -891,47 +891,47 @@ mod tests {
 
         tree.add("a".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
         assert_eq!(iter.next(), None);
 
         tree.add("b".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
-        assert_eq!(iter.next(), Some(&"b".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
         assert_eq!(iter.next(), None);
 
         tree.add("c".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
-        assert_eq!(iter.next(), Some(&"b".to_string()));
-        assert_eq!(iter.next(), Some(&"c".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
         assert_eq!(iter.next(), None);
 
         tree.add("d".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
-        assert_eq!(iter.next(), Some(&"b".to_string()));
-        assert_eq!(iter.next(), Some(&"c".to_string()));
-        assert_eq!(iter.next(), Some(&"d".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
         assert_eq!(iter.next(), None);
 
         tree.add("e".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
-        assert_eq!(iter.next(), Some(&"b".to_string()));
-        assert_eq!(iter.next(), Some(&"c".to_string()));
-        assert_eq!(iter.next(), Some(&"d".to_string()));
-        assert_eq!(iter.next(), Some(&"e".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
         assert_eq!(iter.next(), None);
 
         tree.add("f".to_string());
         let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some(&"a".to_string()));
-        assert_eq!(iter.next(), Some(&"b".to_string()));
-        assert_eq!(iter.next(), Some(&"c".to_string()));
-        assert_eq!(iter.next(), Some(&"d".to_string()));
-        assert_eq!(iter.next(), Some(&"e".to_string()));
-        assert_eq!(iter.next(), Some(&"f".to_string()));
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(iter.next(), Some("f".to_string()));
         assert_eq!(iter.next(), None);
 
         for i in 0..100 {
@@ -939,11 +939,11 @@ mod tests {
         }
         let mut iter = tree.into_iter();
         for char in ["a", "b", "c", "d", "e", "f"].iter() {
-            assert_eq!(iter.next(), Some(&char.to_string()));
+            assert_eq!(iter.next(), Some(char.to_string()));
         }
 
         for i in 0..100 {
-            assert_eq!(iter.next(), Some(&i.to_string()));
+            assert_eq!(iter.next(), Some(i.to_string()));
         }
         assert_eq!(iter.next(), None);
     }
