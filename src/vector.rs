@@ -214,6 +214,11 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         Ok(tree)
     }
 
+    /// Expose the hasher
+    fn hasher(&self) -> &T {
+        &self.hasher
+    }
+
     /// Add a new element to the Merkle Tree, keeping the internal array
     /// consistent as necessary.
     ///
