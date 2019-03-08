@@ -250,6 +250,14 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         }
     }
 
+    /// Iterate over clones of all leaf notes in the tree, without consuming
+    /// the tree.
+    fn iter_notes<'a>(
+        &'a self,
+    ) -> Box<Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a> {
+        Box::new(VectorLeafIterator::new(&self.nodes))
+    }
+
     /// The current root hash of the tree.
     fn root_hash(&self) -> Option<<T::Element as HashableElement>::Hash> {
         self.extract_hash(0).map(|h| {
@@ -353,23 +361,13 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write_u8(self.tree_depth as u8)?;
         writer.write_u32::<LittleEndian>(self.len() as u32)?;
-        for element in self {
+        for element in self.iter_notes() {
             element.write(writer)?;
         }
         Ok(())
     }
 }
 
-impl<'a, T: MerkleHasher> IntoIterator for &'a VectorMerkleTree<T> {
-    type Item = T::Element;
-    type IntoIter = VectorLeafIterator<'a, T>;
-
-    /// Allow a for..in over the tree. This iterates references to the tree nodes.
-    /// It can only be called on a &VectorMerkleTree.
-    fn into_iter(self) -> Self::IntoIter {
-        VectorLeafIterator::new(&self.nodes)
-    }
-}
 /// Is it a complete binary tree that would need a new level if we added
 /// a node? (It's complete if the number of nodes is a power of two)
 fn is_complete(num_nodes: usize) -> bool {
@@ -891,58 +889,68 @@ mod tests {
     #[test]
     fn iteration() {
         let mut tree = VectorMerkleTree::new(StringHasher {});
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), None);
+        {
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), None);
+        }
 
         tree.add("a".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), None);
+        {
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), None);
+        }
 
-        tree.add("b".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), Some("b".to_string()));
-        assert_eq!(iter.next(), None);
-
-        tree.add("c".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), Some("b".to_string()));
-        assert_eq!(iter.next(), Some("c".to_string()));
-        assert_eq!(iter.next(), None);
-
-        tree.add("d".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), Some("b".to_string()));
-        assert_eq!(iter.next(), Some("c".to_string()));
-        assert_eq!(iter.next(), Some("d".to_string()));
-        assert_eq!(iter.next(), None);
-
-        tree.add("e".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), Some("b".to_string()));
-        assert_eq!(iter.next(), Some("c".to_string()));
-        assert_eq!(iter.next(), Some("d".to_string()));
-        assert_eq!(iter.next(), Some("e".to_string()));
-        assert_eq!(iter.next(), None);
-
-        tree.add("f".to_string());
-        let mut iter = tree.into_iter();
-        assert_eq!(iter.next(), Some("a".to_string()));
-        assert_eq!(iter.next(), Some("b".to_string()));
-        assert_eq!(iter.next(), Some("c".to_string()));
-        assert_eq!(iter.next(), Some("d".to_string()));
-        assert_eq!(iter.next(), Some("e".to_string()));
-        assert_eq!(iter.next(), Some("f".to_string()));
-        assert_eq!(iter.next(), None);
+        {
+            tree.add("b".to_string());
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), Some("b".to_string()));
+            assert_eq!(iter.next(), None);
+        }
+        {
+            tree.add("c".to_string());
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), Some("b".to_string()));
+            assert_eq!(iter.next(), Some("c".to_string()));
+            assert_eq!(iter.next(), None);
+        }
+        {
+            tree.add("d".to_string());
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), Some("b".to_string()));
+            assert_eq!(iter.next(), Some("c".to_string()));
+            assert_eq!(iter.next(), Some("d".to_string()));
+            assert_eq!(iter.next(), None);
+        }
+        {
+            tree.add("e".to_string());
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), Some("b".to_string()));
+            assert_eq!(iter.next(), Some("c".to_string()));
+            assert_eq!(iter.next(), Some("d".to_string()));
+            assert_eq!(iter.next(), Some("e".to_string()));
+            assert_eq!(iter.next(), None);
+        }
+        {
+            tree.add("f".to_string());
+            let mut iter = tree.iter_notes();
+            assert_eq!(iter.next(), Some("a".to_string()));
+            assert_eq!(iter.next(), Some("b".to_string()));
+            assert_eq!(iter.next(), Some("c".to_string()));
+            assert_eq!(iter.next(), Some("d".to_string()));
+            assert_eq!(iter.next(), Some("e".to_string()));
+            assert_eq!(iter.next(), Some("f".to_string()));
+            assert_eq!(iter.next(), None);
+        }
 
         for i in 0..100 {
             tree.add(i.to_string());
         }
-        let mut iter = tree.into_iter();
+        let mut iter = tree.iter_notes();
         for char in ["a", "b", "c", "d", "e", "f"].iter() {
             assert_eq!(iter.next(), Some(char.to_string()));
         }

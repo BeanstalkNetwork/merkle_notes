@@ -83,10 +83,7 @@ pub trait MerkleHasher {
 /// Interface for an append-only Merkle tree. The methods it supports are
 /// specifically useful for crypto-currency style commitments, where each leaf
 /// represents one note. There may be other use cases, however.
-pub trait MerkleTree
-where
-    for<'a> &'a Self: IntoIterator<Item = <Self::Hasher as MerkleHasher>::Element>,
-{
+pub trait MerkleTree {
     type Hasher: MerkleHasher;
 
     /// Construct a new, empty merkle tree on the heap that uses the provided
@@ -104,6 +101,12 @@ where
 
     /// Get the number of leaf nodes in the tree.
     fn len(&self) -> usize;
+
+    /// Iterate over clones of all leaf notes in the tree, without consuming
+    /// the tree.
+    fn iter_notes<'a>(
+        &'a self,
+    ) -> Box<Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a>;
 
     /// Get the hash of the current root element in the tree.
     fn root_hash(
