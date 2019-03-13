@@ -96,18 +96,20 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// that everything needs to be moved around and hashes need to be
     /// recalculated. The garbage in this method is the whole reason a vector
     /// based complete binary tree implementation is inefficient.
-    fn rehash_all_levels(&mut self, element: T::Element) {
+    fn add_leaf_rehash(&mut self, element: T::Element) {
         let mut new_vec = VecDeque::new();
         new_vec.push_front(Node::Leaf(element));
 
         let old_vec_length = self.nodes.len();
         let old_leaf_start = first_leaf(old_vec_length);
-        let old_tree_depth = depth_at_index(old_vec_length - 1);
 
         for _ in old_leaf_start..old_vec_length {
             new_vec.push_front(self.nodes.pop_back().expect("There are more nodes"));
         }
         self.nodes = new_vec;
+
+        self.rehash_all_levels();
+    }
 
         // The deque currently contains all the leaf nodes, with the first leaf at index 0
         // and last leaf at the end.
@@ -116,9 +118,13 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
         // This gets confusing because we need to keep track of nodes relative to their
         // current position in the deque, as well as their final position once the deque
         // is full
-        let mut index_being_added = old_vec_length - 1;
+    fn rehash_all_levels(&mut self) {
+        let num_internal = first_leaf_by_num_leaves(self.nodes.len());
+        let internal_depth = depth_at_index(num_internal - 1);
+
+        let mut index_being_added = num_internal - 1;
         loop {
-            let child_node_depth = old_tree_depth - depth_at_index(index_being_added);
+            let child_node_depth = internal_depth - depth_at_index(index_being_added);
             let left_child_in_nodes = left_child_index(index_being_added) - index_being_added - 1;
 
             let new_node = match (
@@ -234,7 +240,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
             if depth_at_index(self.nodes.len()) == self.tree_depth + 1 {
                 panic!("Tree is full!");
             }
-            self.rehash_all_levels(element);
+            self.add_leaf_rehash(element);
         } else {
             self.nodes.push_back(Node::Leaf(element));
             self.rehash_leaf_path();
@@ -399,6 +405,16 @@ fn first_leaf(num_nodes: usize) -> usize {
     (1 << depth_at_index(num_nodes - 1) - 1) - 1
 }
 
+/// What is the index of the first leaf of a tree with num_leaves leaves
+/// (basically (2 ** (depth_at_index - 2)) - 1)
+fn first_leaf_by_num_leaves(num_leaves: usize) -> usize {
+    match num_leaves {
+        0 => panic!("Tree is empty"),
+        1 => 0,
+        _ => (1 << (depth_at_index(num_leaves - 2))) - 1,
+    }
+}
+
 /// Get the index of my node's left child. The right child is always
 /// left_child_index + 1
 fn left_child_index(my_index: usize) -> usize {
@@ -420,8 +436,8 @@ fn is_left_child(my_index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        depth_at_index, first_leaf, is_complete, is_left_child, parent_index, Node,
-        VectorMerkleTree,
+        depth_at_index, first_leaf, first_leaf_by_num_leaves, is_complete, is_left_child,
+        parent_index, Node, VectorMerkleTree,
     };
     use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -1029,6 +1045,40 @@ mod tests {
         assert_eq!(first_leaf(31), 15);
         assert_eq!(first_leaf(63), 31);
         assert_eq!(first_leaf(64), 63);
+    }
+
+    #[test]
+    fn test_first_leaf_by_num_leaves() {
+        for i in 1..18 {
+            println!(
+                "{} {} {}",
+                i,
+                depth_at_index(i),
+                first_leaf_by_num_leaves(i)
+            );
+        }
+        assert_eq!(first_leaf_by_num_leaves(1), 0);
+        assert_eq!(first_leaf_by_num_leaves(2), 1);
+        assert_eq!(first_leaf_by_num_leaves(3), 3);
+        assert_eq!(first_leaf_by_num_leaves(4), 3);
+        assert_eq!(first_leaf_by_num_leaves(5), 7);
+        assert_eq!(first_leaf_by_num_leaves(6), 7);
+        assert_eq!(first_leaf_by_num_leaves(7), 7);
+        assert_eq!(first_leaf_by_num_leaves(8), 7);
+        assert_eq!(first_leaf_by_num_leaves(9), 15);
+        assert_eq!(first_leaf_by_num_leaves(10), 15);
+        assert_eq!(first_leaf_by_num_leaves(11), 15);
+        assert_eq!(first_leaf_by_num_leaves(12), 15);
+        assert_eq!(first_leaf_by_num_leaves(13), 15);
+        assert_eq!(first_leaf_by_num_leaves(14), 15);
+        assert_eq!(first_leaf_by_num_leaves(15), 15);
+        assert_eq!(first_leaf_by_num_leaves(16), 15);
+        assert_eq!(first_leaf_by_num_leaves(17), 31);
+        assert_eq!(first_leaf_by_num_leaves(32), 31);
+        assert_eq!(first_leaf_by_num_leaves(33), 63);
+        assert_eq!(first_leaf_by_num_leaves(64), 63);
+        assert_eq!(first_leaf_by_num_leaves(65), 127);
+        assert_eq!(first_leaf_by_num_leaves(128), 127);
     }
 
     #[test]
