@@ -97,27 +97,26 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// recalculated. The garbage in this method is the whole reason a vector
     /// based complete binary tree implementation is inefficient.
     fn add_leaf_rehash(&mut self, element: T::Element) {
-        let mut new_vec = VecDeque::new();
-        new_vec.push_front(Node::Leaf(element));
+        let old_leaf_start = first_leaf(self.nodes.len());
+        self.nodes.push_back(Node::Leaf(element));
 
-        let old_vec_length = self.nodes.len();
-        let old_leaf_start = first_leaf(old_vec_length);
-
-        for _ in old_leaf_start..old_vec_length {
-            new_vec.push_front(self.nodes.pop_back().expect("There are more nodes"));
+        for _ in 0..old_leaf_start {
+            self.nodes.pop_front();
         }
-        self.nodes = new_vec;
 
         self.rehash_all_levels();
     }
 
-        // The deque currently contains all the leaf nodes, with the first leaf at index 0
-        // and last leaf at the end.
-        //
-        // Next, all the internal nodes need to be pushed onto the front of the deque.
-        // This gets confusing because we need to keep track of nodes relative to their
-        // current position in the deque, as well as their final position once the deque
-        // is full
+    /// Assuming self.nodes contains only leaf nodes, rebuild the hashes of all the
+    /// internal nodes.
+    ///
+    /// The deque currently contains all the leaf nodes, with the first leaf at index 0
+    /// and last leaf at the end.
+    ///
+    /// Next, all the internal nodes need to be pushed onto the front of the deque.
+    /// This gets confusing because we need to keep track of nodes relative to their
+    /// current position in the deque, as well as their final position once the deque
+    /// is full
     fn rehash_all_levels(&mut self) {
         let num_internal = first_leaf_by_num_leaves(self.nodes.len());
         let internal_depth = depth_at_index(num_internal - 1);
