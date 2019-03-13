@@ -102,6 +102,13 @@ pub trait MerkleTree {
     /// Get the number of leaf nodes in the tree.
     fn len(&self) -> usize;
 
+    /// Truncate the tree to the values it contained when it contained past_size
+    /// elements.
+    ///
+    /// After calling, it will contain at most past_size elements, but truncating
+    /// to a size that is higher than self.len() is a no-op.
+    fn truncate(&mut self, past_size: usize);
+
     /// Iterate over clones of all leaf notes in the tree, without consuming
     /// the tree.
     fn iter_notes<'a>(

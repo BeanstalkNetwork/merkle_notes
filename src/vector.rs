@@ -119,6 +119,9 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// is full
     fn rehash_all_levels(&mut self) {
         let num_internal = first_leaf_by_num_leaves(self.nodes.len());
+        if num_internal == 0 {
+            return;
+        }
         let internal_depth = depth_at_index(num_internal - 1);
 
         let mut index_being_added = num_internal - 1;
@@ -253,6 +256,29 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         } else {
             self.nodes.len() - first_leaf(self.nodes.len())
         }
+    }
+
+    /// Truncate the tree to when it was a specific past size.
+    fn truncate(&mut self, past_size: usize) {
+        if past_size >= self.len() {
+            return;
+        }
+        if past_size == 0 {
+            self.nodes.clear();
+            return;
+        }
+
+        let old_leaf_start = first_leaf(self.nodes.len());
+
+        for _ in 0..self.len() - past_size {
+            self.nodes.pop_back();
+        }
+
+        for _ in 0..old_leaf_start {
+            self.nodes.pop_front();
+        }
+
+        self.rehash_all_levels();
     }
 
     /// Iterate over clones of all leaf notes in the tree, without consuming
@@ -899,6 +925,53 @@ mod tests {
                 WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn test_truncate() {
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
+        tree.truncate(0);
+        tree.truncate(1);
+
+        tree.add("a".to_string());
+        tree.truncate(1);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree.nodes.len(), 1);
+        assert_eq!(tree.iter_notes().next(), Some("a".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+        tree.truncate(0);
+        assert_eq!(tree.len(), 0);
+        assert_eq!(tree.nodes.len(), 0);
+        assert!(tree.root_hash().is_none());
+
+        tree.add("a".to_string());
+        tree.add("b".to_string());
+        tree.truncate(2);
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree.nodes.len(), 3);
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+        tree.truncate(1);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree.iter_notes().next(), Some("a".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+
+        tree.add("b".to_string());
+        tree.add("c".to_string());
+        tree.add("d".to_string());
+        tree.add("e".to_string());
+        tree.add("f".to_string());
+        tree.add("g".to_string());
+        tree.add("h".to_string());
+        tree.add("i".to_string());
+        tree.truncate(5); // abcde
+        assert_eq!(tree.len(), 5);
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<e|e-0>|<e|e-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<e|e-0>|<e|e-0>-1>-2>-3>".to_string()));
     }
 
     #[test]
