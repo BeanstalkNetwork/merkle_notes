@@ -223,8 +223,8 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     }
 
     /// Expose the hasher
-    fn hasher(&mut self) -> &mut T {
-        &mut self.hasher
+    fn hasher(&self) -> &T {
+        &self.hasher
     }
 
     /// Add a new element to the Merkle Tree, keeping the internal array

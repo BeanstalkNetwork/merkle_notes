@@ -94,7 +94,7 @@ pub trait MerkleTree {
     fn read<R: io::Read>(hasher: Self::Hasher, reader: &mut R) -> io::Result<Box<Self>>;
 
     /// Expose the hasher for other APIs to use
-    fn hasher(&mut self) -> &mut Self::Hasher;
+    fn hasher(&self) -> &Self::Hasher;
 
     /// Insert the new leaf element into the tree, and update all hashes.
     fn add(&mut self, element: <Self::Hasher as MerkleHasher>::Element);
