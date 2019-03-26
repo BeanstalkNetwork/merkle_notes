@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::io;
+use std::rc::Rc;
 
 pub mod vector;
 
@@ -88,13 +89,14 @@ pub trait MerkleTree {
 
     /// Construct a new, empty merkle tree on the heap that uses the provided
     /// hasher to calculate hashes and load elements
-    fn new(hasher: Self::Hasher) -> Box<Self>;
+    fn new(hasher: Rc<Self::Hasher>) -> Box<Self>;
 
     /// Deserialize the Merkle tree from a reader.
-    fn read<R: io::Read>(hasher: Self::Hasher, reader: &mut R) -> io::Result<Box<Self>>;
+    fn read<R: io::Read>(hasher: Rc<Self::Hasher>, reader: &mut R) -> io::Result<Box<Self>>;
 
-    /// Expose the hasher for other APIs to use
-    fn hasher(&self) -> &Self::Hasher;
+    /// Expose the hasher for other APIs to use. Returns an Rc to avoid getting
+    /// references clogged up.
+    fn hasher(&self) -> Rc<Self::Hasher>;
 
     /// Insert the new leaf element into the tree, and update all hashes.
     fn add(&mut self, element: <Self::Hasher as MerkleHasher>::Element);

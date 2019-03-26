@@ -7,6 +7,7 @@ use super::{HashableElement, MerkleHasher, MerkleTree, Witness, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
+use std::rc::Rc;
 
 /// A node in the Vector based merkle tree. Leafs hold an element,
 /// Internals hold a hash, and Empty is... yeah.
@@ -79,12 +80,12 @@ impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
 pub struct VectorMerkleTree<T: MerkleHasher> {
     nodes: VecDeque<Node<T>>,
     tree_depth: usize,
-    hasher: T,
+    hasher: Rc<T>,
 }
 
 impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// Used for simpler unit tests
-    fn new_with_size(hasher: T, tree_depth: usize) -> Box<Self> {
+    fn new_with_size(hasher: Rc<T>, tree_depth: usize) -> Box<Self> {
         Box::new(VectorMerkleTree {
             nodes: VecDeque::new(),
             tree_depth,
@@ -207,12 +208,12 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
 
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
-    fn new(hasher: T) -> Box<Self> {
+    fn new(hasher: Rc<T>) -> Box<Self> {
         VectorMerkleTree::new_with_size(hasher, 33)
     }
 
     /// Load a merkle tree from a reader and return a box pointer to it
-    fn read<R: io::Read>(hasher: T, reader: &mut R) -> io::Result<Box<Self>> {
+    fn read<R: io::Read>(hasher: Rc<T>, reader: &mut R) -> io::Result<Box<Self>> {
         let tree_depth = reader.read_u8()?;
         let num_nodes = reader.read_u32::<LittleEndian>()?;
         let mut tree = VectorMerkleTree::new_with_size(hasher, tree_depth as usize);
@@ -223,8 +224,8 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     }
 
     /// Expose the hasher
-    fn hasher(&self) -> &T {
-        &self.hasher
+    fn hasher(&self) -> Rc<T> {
+        self.hasher.clone()
     }
 
     /// Add a new element to the Merkle Tree, keeping the internal array
@@ -469,6 +470,7 @@ mod tests {
     use std::fmt;
     use std::io;
     use std::io::Read;
+    use std::rc::Rc;
 
     /// Fake hashable element that just concatenates strings so it is easy to
     /// test that the correct values are output. It's weird cause the hashes are
@@ -489,6 +491,12 @@ mod tests {
 
     #[derive(Debug)]
     struct StringHasher {}
+
+    impl StringHasher {
+        fn new() -> Rc<StringHasher> {
+            Rc::new(StringHasher {})
+        }
+    }
 
     impl MerkleHasher for StringHasher {
         type Element = String;
@@ -560,6 +568,12 @@ mod tests {
     #[derive(Debug)]
     struct CountHasher {}
 
+    impl CountHasher {
+        fn new() -> Rc<CountHasher> {
+            Rc::new(CountHasher {})
+        }
+    }
+
     impl MerkleHasher for CountHasher {
         type Element = u64;
         fn combine_hash(&self, _depth: usize, left: &u64, _right: &u64) -> u64 {
@@ -581,7 +595,7 @@ mod tests {
 
     #[test]
     fn add() {
-        let mut tree = VectorMerkleTree::new(StringHasher {});
+        let mut tree = VectorMerkleTree::new(StringHasher::new());
         tree.add("a".to_string());
         assert_eq!(tree.nodes.len(), 1);
         assert_matches!(tree.nodes[0], Node::Leaf(ref e) if *e == "a".to_string());
@@ -699,7 +713,7 @@ mod tests {
 
     #[test]
     fn len() {
-        let mut tree = VectorMerkleTree::new(StringHasher {});
+        let mut tree = VectorMerkleTree::new(StringHasher::new());
         for i in 0..100 {
             assert_eq!(tree.len(), i);
             tree.add("a".to_string());
@@ -708,7 +722,7 @@ mod tests {
 
     #[test]
     fn root_hash_functions() {
-        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher::new(), 5);
         assert_eq!(tree.root_hash(), None);
         assert_eq!(tree.past_root(1), None);
         tree.add("a".to_string());
@@ -764,7 +778,7 @@ mod tests {
 
     #[test]
     fn witness_path() {
-        let hasher = StringHasher {};
+        let hasher = StringHasher::new();
         // Tree with 4 levels (8 leaves) for easier reasoning
         let mut tree = VectorMerkleTree::new_with_size(hasher, 4);
         assert!(tree.witness(0).is_none());
@@ -929,7 +943,7 @@ mod tests {
 
     #[test]
     fn test_truncate() {
-        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher::new(), 5);
         tree.truncate(0);
         tree.truncate(1);
 
@@ -976,7 +990,7 @@ mod tests {
 
     #[test]
     fn iteration() {
-        let mut tree = VectorMerkleTree::new(StringHasher {});
+        let mut tree = VectorMerkleTree::new(StringHasher::new());
         {
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), None);
@@ -1051,7 +1065,7 @@ mod tests {
 
     #[test]
     fn serialization() {
-        let mut tree = VectorMerkleTree::new_with_size(StringHasher {}, 5);
+        let mut tree = VectorMerkleTree::new_with_size(StringHasher::new(), 5);
         for i in 0..12 {
             tree.add(i.to_string());
         }
@@ -1060,7 +1074,7 @@ mod tests {
             .expect("should be able to write bytes.");
 
         let read_back_tree: Box<VectorMerkleTree<StringHasher>> =
-            VectorMerkleTree::read(StringHasher {}, &mut bytes[..].as_ref())
+            VectorMerkleTree::read(StringHasher::new(), &mut bytes[..].as_ref())
                 .expect("should be able to read bytes.");
 
         let mut bytes_again = vec![];
@@ -1215,7 +1229,7 @@ mod tests {
 
     #[test]
     fn default_authpath_len() {
-        let mut tree = VectorMerkleTree::new(CountHasher {});
+        let mut tree = VectorMerkleTree::new(CountHasher::new());
         tree.add(1);
         let witness = tree.witness(0).expect("node exists");
         assert_eq!(witness.root_hash, 33);
