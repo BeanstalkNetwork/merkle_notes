@@ -387,6 +387,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         Some(Witness {
             auth_path,
             root_hash: self.root_hash().expect("Non-empty tree must have root"),
+            tree_size: self.len(),
         })
     }
     /// Write the vector to an array
@@ -790,6 +791,7 @@ mod tests {
         assert!(witness.verify(&tree.hasher, &"a".to_string()));
         assert!(!witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
+        assert_eq!(witness.tree_size, 1);
         assert_eq!(
             witness.auth_path,
             vec![
@@ -803,6 +805,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>";
         assert!(tree.witness(2).is_none());
         witness = tree.witness(0).expect("path exists");
+        assert_eq!(witness.tree_size, 2);
         assert!(witness.verify(&tree.hasher, &"a".to_string()));
         assert!(!witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
@@ -815,6 +818,7 @@ mod tests {
             ]
         );
         witness = tree.witness(1).expect("path exists");
+        assert_eq!(witness.tree_size, 2);
         assert!(witness.verify(&tree.hasher, &"b".to_string()));
         assert!(!witness.verify(&tree.hasher, &"a".to_string()));
         assert_eq!(witness.root_hash, expected_root);
@@ -831,6 +835,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>";
         assert!(tree.witness(3).is_none());
         witness = tree.witness(0).expect("path exists");
+        assert_eq!(witness.tree_size, 3);
         assert!(witness.verify(&tree.hasher, &"a".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
@@ -842,6 +847,7 @@ mod tests {
             ]
         );
         witness = tree.witness(1).expect("path exists");
+        assert_eq!(witness.tree_size, 3);
         assert!(witness.verify(&tree.hasher, &"b".to_string()));
         assert_eq!(witness.root_hash, expected_root);
 
@@ -854,6 +860,7 @@ mod tests {
             ]
         );
         witness = tree.witness(2).expect("path exists");
+        assert_eq!(witness.tree_size, 3);
         assert!(witness.verify(&tree.hasher, &"c".to_string()));
         assert_eq!(witness.root_hash, expected_root);
 
@@ -868,6 +875,7 @@ mod tests {
         tree.add("d".to_string());
         expected_root = "<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>";
         witness = tree.witness(3).expect("path exists");
+        assert_eq!(witness.tree_size, 4);
         assert_eq!(witness.root_hash, expected_root);
         assert!(witness.verify(&tree.hasher, &"d".to_string()));
         assert!(tree.witness(4).is_none());
@@ -885,6 +893,7 @@ mod tests {
         expected_root = "<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>";
         assert!(tree.witness(8).is_none());
         witness = tree.witness(3).expect("path exists");
+        assert_eq!(witness.tree_size, 8);
         assert!(witness.verify(&tree.hasher, &"d".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
@@ -896,6 +905,7 @@ mod tests {
             ]
         );
         witness = tree.witness(4).expect("path exists");
+        assert_eq!(witness.tree_size, 8);
         assert!(witness.verify(&tree.hasher, &"0".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
@@ -907,6 +917,7 @@ mod tests {
             ]
         );
         witness = tree.witness(5).expect("path exists");
+        assert_eq!(witness.tree_size, 8);
         assert!(witness.verify(&tree.hasher, &"1".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
@@ -918,6 +929,7 @@ mod tests {
             ]
         );
         witness = tree.witness(6).expect("path exists");
+        assert_eq!(witness.tree_size, 8);
         assert!(witness.verify(&tree.hasher, &"2".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(
@@ -929,6 +941,7 @@ mod tests {
             ]
         );
         witness = tree.witness(7).expect("path exists");
+        assert_eq!(witness.tree_size, 8);
         assert!(witness.verify(&tree.hasher, &"3".to_string()));
         assert_eq!(witness.root_hash, expected_root);
         assert_eq!(

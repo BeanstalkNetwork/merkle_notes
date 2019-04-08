@@ -158,6 +158,7 @@ pub enum WitnessNode<H: MerkleHash> {
 /// and the root_hash of the tree at the time the authentication_path was
 /// calculated.
 pub struct Witness<H: MerkleHasher> {
+    pub tree_size: usize,
     pub root_hash: <H::Element as HashableElement>::Hash,
     pub auth_path: Vec<WitnessNode<<H::Element as HashableElement>::Hash>>,
 }
