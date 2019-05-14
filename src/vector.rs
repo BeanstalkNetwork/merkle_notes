@@ -250,6 +250,18 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         }
     }
 
+    /// Get the leaf note at a specific position
+    fn get(&self, position: usize) -> Option<&<Self::Hasher as MerkleHasher>::Element> {
+        if self.nodes.len() == 0 {
+            return None;
+        }
+        let position = first_leaf(self.nodes.len()) + position;
+        match self.nodes.get(position) {
+            Some(Node::Leaf(element)) => Some(element),
+            _ => None,
+        }
+    }
+
     /// Get the number of leaf nodes in the tree
     fn len(&self) -> usize {
         if self.nodes.len() == 0 {
@@ -1002,37 +1014,53 @@ mod tests {
     }
 
     #[test]
-    fn iteration() {
+    fn iteration_and_get() {
+        color_backtrace::install();
         let mut tree = VectorMerkleTree::new(StringHasher::new());
         {
+            assert_eq!(tree.get(0), None);
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), None);
         }
 
         tree.add("a".to_string());
         {
+            assert_eq!(tree.get(1), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), None);
         }
-
+        tree.add("b".to_string());
         {
-            tree.add("b".to_string());
+            assert_eq!(tree.get(2), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+            assert_eq!(*tree.get(1).unwrap(), "b".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), Some("b".to_string()));
             assert_eq!(iter.next(), None);
         }
+        tree.add("c".to_string());
         {
-            tree.add("c".to_string());
+            assert_eq!(tree.get(3), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+            assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+            assert_eq!(*tree.get(2).unwrap(), "c".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), Some("b".to_string()));
             assert_eq!(iter.next(), Some("c".to_string()));
             assert_eq!(iter.next(), None);
         }
+
+        tree.add("d".to_string());
         {
-            tree.add("d".to_string());
+            assert_eq!(tree.get(4), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+            assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+            assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+            assert_eq!(*tree.get(3).unwrap(), "d".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), Some("b".to_string()));
@@ -1040,8 +1068,15 @@ mod tests {
             assert_eq!(iter.next(), Some("d".to_string()));
             assert_eq!(iter.next(), None);
         }
+
+        tree.add("e".to_string());
         {
-            tree.add("e".to_string());
+            assert_eq!(tree.get(5), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+            assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+            assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+            assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+            assert_eq!(*tree.get(4).unwrap(), "e".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), Some("b".to_string()));
@@ -1050,8 +1085,16 @@ mod tests {
             assert_eq!(iter.next(), Some("e".to_string()));
             assert_eq!(iter.next(), None);
         }
+
+        tree.add("f".to_string());
         {
-            tree.add("f".to_string());
+            assert_eq!(tree.get(6), None);
+            assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+            assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+            assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+            assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+            assert_eq!(*tree.get(4).unwrap(), "e".to_string());
+            assert_eq!(*tree.get(5).unwrap(), "f".to_string());
             let mut iter = tree.iter_notes();
             assert_eq!(iter.next(), Some("a".to_string()));
             assert_eq!(iter.next(), Some("b".to_string()));
