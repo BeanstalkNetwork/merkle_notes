@@ -7,7 +7,7 @@ use super::{HashableElement, MerkleHasher, MerkleTree, Witness, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
 use std::io;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// A node in the Vector based merkle tree. Leafs hold an element,
 /// Internals hold a hash, and Empty is... yeah.
@@ -80,12 +80,12 @@ impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
 pub struct VectorMerkleTree<T: MerkleHasher> {
     nodes: VecDeque<Node<T>>,
     tree_depth: usize,
-    hasher: Rc<T>,
+    hasher: Arc<T>,
 }
 
 impl<T: MerkleHasher> VectorMerkleTree<T> {
     /// Used for simpler unit tests
-    fn new_with_size(hasher: Rc<T>, tree_depth: usize) -> Box<Self> {
+    fn new_with_size(hasher: Arc<T>, tree_depth: usize) -> Box<Self> {
         Box::new(VectorMerkleTree {
             nodes: VecDeque::new(),
             tree_depth,
@@ -208,12 +208,12 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
 
     /// Construct a new, empty merkle tree on the heap and return a Box pointer
     /// to it.
-    fn new(hasher: Rc<T>) -> Box<Self> {
+    fn new(hasher: Arc<T>) -> Box<Self> {
         VectorMerkleTree::new_with_size(hasher, 33)
     }
 
     /// Load a merkle tree from a reader and return a box pointer to it
-    fn read<R: io::Read>(hasher: Rc<T>, reader: &mut R) -> io::Result<Box<Self>> {
+    fn read<R: io::Read>(hasher: Arc<T>, reader: &mut R) -> io::Result<Box<Self>> {
         let tree_depth = reader.read_u8()?;
         let num_nodes = reader.read_u32::<LittleEndian>()?;
         let mut tree = VectorMerkleTree::new_with_size(hasher, tree_depth as usize);
@@ -224,7 +224,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     }
 
     /// Expose the hasher
-    fn hasher(&self) -> Rc<T> {
+    fn hasher(&self) -> Arc<T> {
         self.hasher.clone()
     }
 
@@ -483,7 +483,7 @@ mod tests {
     use std::fmt;
     use std::io;
     use std::io::Read;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     /// Fake hashable element that just concatenates strings so it is easy to
     /// test that the correct values are output. It's weird cause the hashes are
@@ -506,8 +506,8 @@ mod tests {
     struct StringHasher {}
 
     impl StringHasher {
-        fn new() -> Rc<StringHasher> {
-            Rc::new(StringHasher {})
+        fn new() -> Arc<StringHasher> {
+            Arc::new(StringHasher {})
         }
     }
 
@@ -582,8 +582,8 @@ mod tests {
     struct CountHasher {}
 
     impl CountHasher {
-        fn new() -> Rc<CountHasher> {
-            Rc::new(CountHasher {})
+        fn new() -> Arc<CountHasher> {
+            Arc::new(CountHasher {})
         }
     }
 

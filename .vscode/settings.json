@@ -2,8 +2,12 @@
     "cSpell.words": [
         "Hashable",
         "Merkle",
+        "byteorder",
         "clonable",
+        "color",
         "crypto",
-        "jubjub"
+        "deque",
+        "jubjub",
+        "performant"
     ]
 }

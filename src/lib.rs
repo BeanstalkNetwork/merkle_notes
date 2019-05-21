@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::io;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub mod vector;
 
@@ -58,7 +58,7 @@ pub trait MerkleHasher {
     // the MerkleHash trait. However, in Beanstalk's real world, MerkleHash
     // is implemented by a trait in a crate we don't control. Instead of going
     // to the trouble of wrapping it with the NewType pattern, I just add this
-    // bit of ineligance here...
+    // bit of inelegance here...
     fn write_hash<W: io::Write>(
         &self,
         hash: &<Self::Element as HashableElement>::Hash,
@@ -89,14 +89,14 @@ pub trait MerkleTree {
 
     /// Construct a new, empty merkle tree on the heap that uses the provided
     /// hasher to calculate hashes and load elements
-    fn new(hasher: Rc<Self::Hasher>) -> Box<Self>;
+    fn new(hasher: Arc<Self::Hasher>) -> Box<Self>;
 
     /// Deserialize the Merkle tree from a reader.
-    fn read<R: io::Read>(hasher: Rc<Self::Hasher>, reader: &mut R) -> io::Result<Box<Self>>;
+    fn read<R: io::Read>(hasher: Arc<Self::Hasher>, reader: &mut R) -> io::Result<Box<Self>>;
 
     /// Expose the hasher for other APIs to use. Returns an Rc to avoid getting
     /// references clogged up.
-    fn hasher(&self) -> Rc<Self::Hasher>;
+    fn hasher(&self) -> Arc<Self::Hasher>;
 
     /// Insert the new leaf element into the tree, and update all hashes.
     fn add(&mut self, element: <Self::Hasher as MerkleHasher>::Element);
