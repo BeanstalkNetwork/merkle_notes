@@ -118,7 +118,7 @@ pub trait MerkleTree {
     /// the tree.
     fn iter_notes<'a>(
         &'a self,
-    ) -> Box<Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a>;
+    ) -> Box<dyn Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a>;
 
     /// Get the hash of the current root element in the tree.
     fn root_hash(

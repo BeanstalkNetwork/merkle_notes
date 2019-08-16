@@ -298,7 +298,7 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     /// the tree.
     fn iter_notes<'a>(
         &'a self,
-    ) -> Box<Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a> {
+    ) -> Box<dyn Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a> {
         Box::new(VectorLeafIterator::new(&self.nodes))
     }
 
