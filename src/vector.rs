@@ -351,6 +351,22 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
         return Some(current_hash);
     }
 
+    /// Did the tree contain the given element when it was the given size?
+    ///
+    /// Uses a slow linear scan. Not... efficient.
+    fn contained(&self, value: &T::Element, past_size: usize) -> bool {
+        for (idx, candidate) in self.iter_notes().enumerate() {
+            if idx == past_size {
+                break;
+            }
+            if candidate == *value {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Construct the proof that the leaf node at `position` exists.
     ///
     /// In this implementation, we guarantee that the witness_path is
@@ -730,6 +746,20 @@ mod tests {
         for i in 0..100 {
             assert_eq!(tree.len(), i);
             tree.add("a".to_string());
+        }
+    }
+
+    #[test]
+    fn contained() {
+        let mut tree = VectorMerkleTree::new(StringHasher::new());
+        assert!(!tree.contained(&1.to_string(), 0));
+        assert!(!tree.contained(&1.to_string(), 1));
+        for i in 1..20 {
+            tree.add(i.to_string());
+            assert!(tree.contained(&i.to_string(), i));
+            assert!(tree.contained(&i.to_string(), i + 1));
+            assert!(!tree.contained(&i.to_string(), i - 1));
+            assert!(tree.contains(&i.to_string()));
         }
     }
 

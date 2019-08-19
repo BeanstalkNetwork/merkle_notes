@@ -24,7 +24,7 @@ impl<T> MerkleHash for T where T: Clone + PartialEq + Debug {}
 /// I made the associated functions operate on this class instead of demanding
 /// that such functions exist on the MerkleHash class so that client libraries
 /// can use arbitrary third-party types (so long as they are clonable) as hashes.
-pub trait HashableElement: Clone {
+pub trait HashableElement: Clone + PartialEq {
     type Hash: MerkleHash;
 
     /// Calculate the hash of this element
@@ -131,6 +131,14 @@ pub trait MerkleTree {
         &self,
         past_size: usize,
     ) -> Option<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash>;
+
+    /// Determine whether a tree contained a value in the past, when it had a specific size.
+    fn contained(&self, value: &<Self::Hasher as MerkleHasher>::Element, past_size: usize) -> bool;
+
+    /// Determine whether a tree contains a value at its current size.
+    fn contains(&self, value: &<Self::Hasher as MerkleHasher>::Element) -> bool {
+        self.contained(value, self.len())
+    }
 
     /// Construct the proof that the leaf node at `position` exists.
     ///
