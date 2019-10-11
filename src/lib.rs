@@ -8,6 +8,9 @@ pub mod vector;
 #[macro_use]
 extern crate assert_matches;
 
+#[cfg(test)]
+pub(crate) mod test_helper;
+
 /// An object that can be used as a hash in a Merkle tree. Basic usage might
 /// use bytes or a string here, but in a production system it might be a
 /// point on an elliptic curve.
