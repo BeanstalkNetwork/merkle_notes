@@ -1,7 +1,10 @@
+#[macro_use]
+extern crate shrinkwraprs;
 use std::fmt::Debug;
 use std::io;
 use std::sync::Arc;
 
+pub mod linked;
 pub mod vector;
 
 #[cfg(test)]

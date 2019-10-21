@@ -22,7 +22,7 @@ impl HashableElement for String {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct StringHasher {}
 
 impl StringHasher {

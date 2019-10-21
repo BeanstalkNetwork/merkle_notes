@@ -3,12 +3,7 @@ use super::{
     Node, VectorMerkleTree,
 };
 use crate::test_helper::{CountHasher, StringHasher};
-use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::fmt;
-use std::io;
-use std::io::Read;
-use std::sync::Arc;
+use crate::{MerkleTree, WitnessNode};
 
 #[test]
 fn add() {
