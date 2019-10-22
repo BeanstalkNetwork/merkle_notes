@@ -134,6 +134,10 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         (*node_reference).clone()
     }
 
+    fn set_node(&mut self, index: NodeIndex, node: InternalNode<T>) {
+        self.nodes[index.0 as usize] = node;
+    }
+
     /// Get the index of the parent of this node. If this is a left node,
     /// the index is the parent. If it's a right node, index is the parent
     /// of the left node.
@@ -172,24 +176,27 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         };
         loop {
             let node = self.node_at(parent_index);
-            dbg!(&parent_hash);
+            depth += 1;
+
             match node {
                 InternalNode::Empty => break,
                 InternalNode::Left {
                     parent,
                     hash_of_sibling,
                 } => {
-                    // since we are walking the rightmost path, left notes do not have
+                    // since we are walking the rightmost path, left nodes do not have
                     // right children. Therefore its sibling hash can be set to
                     // its own hash in its parent half will be set to the combination of
                     // that hash with itself
-                    self.nodes[parent_index.0 as usize] = InternalNode::Left {
-                        parent,
-                        hash_of_sibling: parent_hash.clone(),
-                    };
+                    self.set_node(
+                        parent_index,
+                        InternalNode::Left {
+                            parent,
+                            hash_of_sibling: parent_hash.clone(),
+                        },
+                    );
                     parent_index = parent;
                     parent_hash = self.hasher.combine_hash(depth, &parent_hash, &parent_hash);
-                    depth += 1;
                 }
                 InternalNode::Right {
                     left,
@@ -198,7 +205,17 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                     // since this is a new right node we know that we have the correct hash
                     // because we set it correctly when we inserted it. But our left node
                     // needs to have its hash_of_sibling set to our current hash.
-                    parent_index = left;
+                    parent_index = self.parent_index(left);
+                    self.set_node(
+                        left,
+                        InternalNode::Left {
+                            parent: parent_index,
+                            hash_of_sibling: parent_hash.clone(),
+                        },
+                    );
+                    parent_hash = self
+                        .hasher
+                        .combine_hash(depth, &hash_of_sibling, &parent_hash);
                 }
             }
         }
@@ -212,6 +229,10 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
 
     fn is_empty(&self) -> bool {
         self.leaves.len() == 0
+    }
+
+    fn most_recent_node_index(&self) -> NodeIndex {
+        NodeIndex(self.nodes.len() as u32 - 1)
     }
 
     /// The current root hash of the tree. Start with the left-most node
@@ -295,7 +316,10 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                     self.nodes.push(new_parent_of_both);
                     self.leaves[index_of_new_leaf - 1].parent = new_parent_index;
                 }
-                _ => unimplemented!("Gotta learn to recurse..."),
+                _ => {
+                    self.leaves[index_of_new_leaf].parent =
+                        self.leaves[index_of_new_leaf - 1].parent
+                }
             }
         } else {
             // Walk up the path from the previous leaf until find empty or right-hand leaf.
@@ -316,7 +340,6 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                         };
                         self.nodes.push(new_node);
                         if parent == NodeIndex::empty() {
-                            dbg!(&hash_of_sibling, &my_hash);
                             let new_parent = InternalNode::Left {
                                 parent: NodeIndex::empty(),
                                 hash_of_sibling: hasher.combine_hash(
@@ -326,10 +349,13 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                                 ),
                             };
                             self.nodes.push(new_parent);
-                            self.nodes[previous_parent_index.0 as usize] = InternalNode::Left {
-                                hash_of_sibling,
-                                parent,
-                            };
+                            self.set_node(
+                                previous_parent_index,
+                                InternalNode::Left {
+                                    hash_of_sibling,
+                                    parent: self.most_recent_node_index(),
+                                },
+                            );
                         }
                         break;
                     }
@@ -349,15 +375,8 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                     InternalNode::Empty => unimplemented!("Empty needs to be handled somehow"),
                 }
             }
-            self.rehash_right_path();
-
-            /*
-            I think the loop above is mostly correct.
-            I need to update the test with more nodes.
-             I still need to update hashes past the joint point,
-              deal with the empty nodes, and deal with recursion
-            */
         }
+        self.rehash_right_path();
     }
 }
 
