@@ -1,12 +1,23 @@
 use super::{InternalNode, LeafNode, LinkedMerkleTree, NodeIndex};
 use crate::test_helper::{CountHasher, StringHasher};
-use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
 
 fn leaf(value: char, parent: u32) -> LeafNode<StringHasher> {
     LeafNode {
         element: value.to_string(),
         parent: NodeIndex(parent),
     }
+}
+
+fn make_full_tree() -> Box<LinkedMerkleTree<StringHasher>> {
+    make_tree("abcdefghijklmnop")
+}
+
+fn make_tree(characters: &str) -> Box<LinkedMerkleTree<StringHasher>> {
+    let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    for character in characters.chars() {
+        tree.add(character.to_string());
+    }
+    tree
 }
 
 fn node_matches(
@@ -50,10 +61,17 @@ fn assert_leaves(tree: &LinkedMerkleTree<StringHasher>, characters: &str, parent
     }
 }
 
+fn assert_tree(tree: &LinkedMerkleTree<StringHasher>, characters: &str) {
+    let expected = make_tree(characters);
+    assert_eq!(tree.leaves, expected.leaves);
+    assert_eq!(tree.nodes, expected.nodes);
+}
+
 #[test]
 fn add() {
     color_backtrace::install();
     let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    assert_matches!(tree.node_at(NodeIndex(0)), InternalNode::Empty);
     tree.add("a".to_string());
     assert_leaves(&tree, "a", &[0]);
     assert_eq!(tree.nodes.len(), 1);
@@ -173,6 +191,183 @@ fn add() {
 }
 
 #[test]
+fn len() {
+    let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    for i in 0..100 {
+        assert_eq!(tree.len(), i);
+        tree.add("a".to_string());
+    }
+}
+
+#[test]
+fn iteration_and_get() {
+    color_backtrace::install();
+    let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    {
+        assert_eq!(tree.get(0), None);
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("a".to_string());
+    {
+        assert_eq!(tree.get(1), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("b".to_string());
+    {
+        assert_eq!(tree.get(2), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+    tree.add("c".to_string());
+    {
+        assert_eq!(tree.get(3), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+    tree.add("d".to_string());
+    {
+        assert_eq!(tree.get(4), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("e".to_string());
+    {
+        assert_eq!(tree.get(5), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        assert_eq!(*tree.get(4).unwrap(), "e".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("f".to_string());
+    {
+        assert_eq!(tree.get(6), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        assert_eq!(*tree.get(4).unwrap(), "e".to_string());
+        assert_eq!(*tree.get(5).unwrap(), "f".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(iter.next(), Some("f".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    for i in 0..100 {
+        tree.add(i.to_string());
+    }
+    let mut iter = tree.iter_notes();
+    for char in ["a", "b", "c", "d", "e", "f"].iter() {
+        assert_eq!(iter.next(), Some(char.to_string()));
+    }
+
+    for i in 0..100 {
+        assert_eq!(iter.next(), Some(i.to_string()));
+    }
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn truncate() {
+    color_backtrace::install();
+    let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    tree.truncate(0);
+    assert_tree(&tree, "");
+    tree = make_full_tree();
+    tree.truncate(0);
+    assert_tree(&tree, "");
+    tree = make_full_tree();
+    tree.truncate(1);
+    assert_tree(&tree, "a");
+    tree = make_full_tree();
+    tree.truncate(2);
+    assert_tree(&tree, "ab");
+    tree = make_full_tree();
+    tree.truncate(3);
+    assert_tree(&tree, "abc");
+    tree = make_full_tree();
+    tree.truncate(4);
+    assert_tree(&tree, "abcd");
+    tree = make_full_tree();
+    tree.truncate(5);
+    assert_tree(&tree, "abcde");
+    tree = make_full_tree();
+    tree.truncate(6);
+    assert_tree(&tree, "abcdef");
+    tree = make_full_tree();
+    tree.truncate(7);
+    assert_tree(&tree, "abcdefg");
+    tree = make_full_tree();
+    tree.truncate(8);
+    assert_tree(&tree, "abcdefgh");
+    tree = make_full_tree();
+    tree.truncate(9);
+    assert_tree(&tree, "abcdefghi");
+    tree = make_full_tree();
+    tree.truncate(10);
+    assert_tree(&tree, "abcdefghij");
+    tree = make_full_tree();
+    tree.truncate(11);
+    assert_tree(&tree, "abcdefghijk");
+    tree = make_full_tree();
+    tree.truncate(12);
+    assert_tree(&tree, "abcdefghijkl");
+    tree = make_full_tree();
+    tree.truncate(13);
+    assert_tree(&tree, "abcdefghijklm");
+    tree = make_full_tree();
+    tree.truncate(14);
+    assert_tree(&tree, "abcdefghijklmn");
+    tree = make_full_tree();
+    tree.truncate(15);
+    assert_tree(&tree, "abcdefghijklmno");
+    tree = make_full_tree();
+    tree.truncate(16);
+    assert_tree(&tree, "abcdefghijklmnop");
+    tree = make_full_tree();
+    tree.truncate(17);
+    assert_tree(&tree, "abcdefghijklmnop");
+}
+
+#[test]
 fn root_hash_functions() {
     let mut tree = LinkedMerkleTree::new_with_size(StringHasher::new(), 5);
     assert_eq!(tree.root_hash(), None);
@@ -182,4 +377,13 @@ fn root_hash_functions() {
     );
     tree.add("b".into());
     assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    tree.add("c".to_string());
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+    tree.add("d".to_string());
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+    for i in 0..12 {
+        tree.add(i.to_string());
+    }
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
+    assert!(false, " this test is not finished");
 }
