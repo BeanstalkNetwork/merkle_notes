@@ -292,6 +292,59 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         Some(current_hash)
     }
 
+    fn past_root(&self, past_size: usize) -> Option<<T::Element as HashableElement>::Hash> {
+        let root_depth = depth_at_leaf_count(past_size);
+        if self.is_empty() || past_size > self.len() {
+            return None;
+        }
+        let leaf_index = past_size - 1;
+        let mut current_hash;
+        let mut current_node_index = self.leaves[leaf_index].parent;
+        if is_right_leaf(leaf_index) {
+            current_hash = self.hasher.combine_hash(
+                0,
+                &self.leaves[leaf_index - 1].element.merkle_hash(),
+                &self.leaves[leaf_index].element.merkle_hash(),
+            );
+        } else {
+            current_hash = self.hasher.combine_hash(
+                0,
+                &self.leaves[leaf_index].element.merkle_hash(),
+                &self.leaves[leaf_index].element.merkle_hash(),
+            )
+        }
+
+        for depth in 1..std::cmp::min(root_depth, self.tree_depth) {
+            match self.node_at(current_node_index) {
+                InternalNode::Empty => panic!("depth should not reach empty node"),
+                InternalNode::Left {
+                    parent,
+                    hash_of_sibling,
+                } => {
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &current_hash);
+                    current_node_index = parent;
+                }
+                InternalNode::Right {
+                    left,
+                    hash_of_sibling,
+                } => {
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &hash_of_sibling, &current_hash);
+                    current_node_index = self.parent_index(left);
+                }
+            }
+        }
+        for depth in root_depth..self.tree_depth {
+            current_hash = self
+                .hasher
+                .combine_hash(depth, &current_hash, &current_hash);
+        }
+        Some(current_hash)
+    }
+
     /// Add a new element to the Merkle Tree, keeping all the hashes
     /// consistent.
     fn add(&mut self, element: T::Element) {
