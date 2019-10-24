@@ -200,6 +200,21 @@ fn len() {
 }
 
 #[test]
+fn contained() {
+    let mut tree = LinkedMerkleTree::new(StringHasher::new());
+    assert!(!tree.contained(&1.to_string(), 0));
+    assert!(!tree.contained(&1.to_string(), 1));
+    for i in 1..20 {
+        tree.add(i.to_string());
+        assert!(tree.contained(&i.to_string(), i));
+        assert!(tree.contained(&i.to_string(), i + 1));
+        assert!(!tree.contained(&i.to_string(), i - 1));
+        assert!(false, "Uncomment the following line");
+        // assert!(tree.contains(&i.to_string()));
+    }
+}
+
+#[test]
 fn iteration_and_get() {
     color_backtrace::install();
     let mut tree = LinkedMerkleTree::new(StringHasher::new());

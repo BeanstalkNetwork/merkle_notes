@@ -251,6 +251,21 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         Box::new(self.leaves.iter().map(|leaf| leaf.element.clone()))
     }
 
+    /// did the tree contain the given element when it was the given size?
+    ///
+    /// This is a linear scan.
+    fn contained(&self, value: &T::Element, past_size: usize) -> bool {
+        for (index, candidate) in self.iter_notes().enumerate() {
+            if index == past_size {
+                break;
+            }
+            if candidate == *value {
+                return true;
+            }
+        }
+        false
+    }
+
     /// The current root hash of the tree. Start with the left-most node
     /// and expected depth and walk the tree up to the root.
     fn root_hash(&self) -> Option<<T::Element as HashableElement>::Hash> {
