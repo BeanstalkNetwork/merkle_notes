@@ -1,5 +1,5 @@
-use super::{InternalNode, LeafNode, LinkedMerkleTree, NodeIndex};
-use crate::test_helper::{CountHasher, StringHasher};
+use super::{InternalNode, LeafNode, LinkedMerkleTree, MerkleTree, NodeIndex, WitnessNode};
+use crate::test_helper::StringHasher;
 
 fn leaf(value: char, parent: u32) -> LeafNode<StringHasher> {
     LeafNode {
@@ -209,8 +209,7 @@ fn contained() {
         assert!(tree.contained(&i.to_string(), i));
         assert!(tree.contained(&i.to_string(), i + 1));
         assert!(!tree.contained(&i.to_string(), i - 1));
-        assert!(false, "Uncomment the following line");
-        // assert!(tree.contains(&i.to_string()));
+        assert!(tree.contains(&i.to_string()));
     }
 }
 
@@ -434,4 +433,180 @@ fn root_hash_functions() {
     assert_eq!(tree.past_root(15), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|10-0>-1>-2>-3>".to_string()));
     assert_eq!(tree.past_root(16), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
     assert_eq!(tree.past_root(17), None);
+}
+
+#[test]
+fn witness_path() {
+    let hasher = StringHasher::new();
+    let mut tree = LinkedMerkleTree::new_with_size(hasher, 4);
+    assert!(tree.witness(0).is_none());
+
+    tree.add("a".to_string());
+    assert!(tree.witness(1).is_none());
+    let mut expected_root = "<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>";
+    let mut witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(witness.tree_size, 1);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("a".to_string()),
+            WitnessNode::Left("<a|a-0>".to_string()),
+            WitnessNode::Left("<<a|a-0>|<a|a-0>-1>".to_string()),
+        ]
+    );
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"b".to_string()));
+
+    tree.add("b".to_string());
+    expected_root = "<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>";
+    assert!(tree.witness(2).is_none());
+    witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.tree_size, 2);
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"b".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("b".to_string()),
+            WitnessNode::Left("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(1).expect("path exists");
+    assert_eq!(witness.tree_size, 2);
+    assert!(witness.verify(&tree.hasher, &"b".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"a".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("a".to_string()),
+            WitnessNode::Left("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
+        ]
+    );
+
+    tree.add("c".to_string());
+    expected_root = "<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>";
+    assert!(tree.witness(3).is_none());
+    witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("b".to_string()),
+            WitnessNode::Left("<c|c-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(1).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"b".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("a".to_string()),
+            WitnessNode::Left("<c|c-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(2).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"c".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    tree.add("d".to_string());
+    expected_root = "<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>";
+    witness = tree.witness(3).expect("path exists");
+    assert_eq!(witness.tree_size, 4);
+    assert_eq!(witness.root_hash, expected_root);
+    assert!(witness.verify(&tree.hasher, &"d".to_string()));
+    assert!(tree.witness(4).is_none());
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    for i in 0..4 {
+        tree.add(i.to_string());
+    }
+    expected_root = "<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>";
+    assert!(tree.witness(8).is_none());
+    witness = tree.witness(3).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"d".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<0|1-0>|<2|3-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(4).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"0".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("1".to_string()),
+            WitnessNode::Left("<2|3-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(5).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"1".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("0".to_string()),
+            WitnessNode::Left("<2|3-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(6).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"2".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("3".to_string()),
+            WitnessNode::Right("<0|1-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(7).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"3".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("2".to_string()),
+            WitnessNode::Right("<0|1-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
 }

@@ -1,4 +1,4 @@
-use crate::{HashableElement, MerkleHasher, MerkleTree, WitnessNode};
+use crate::{HashableElement, MerkleHasher, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt;
 use std::io;

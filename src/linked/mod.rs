@@ -1,4 +1,6 @@
-use crate::{HashableElement, MerkleHasher, MerkleTree};
+use crate::{HashableElement, MerkleHasher, MerkleTree, Witness, WitnessNode};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io;
 use std::sync::Arc;
 
 /// Newtype wrapper of u32. It just represents an index into a vector,
@@ -8,10 +10,6 @@ struct NodeIndex(u32);
 impl NodeIndex {
     fn empty() -> Self {
         NodeIndex(0)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.0 == 0
     }
 }
 
@@ -91,9 +89,6 @@ struct LeafNode<T: MerkleHasher> {
 }
 
 impl<T: MerkleHasher> LeafNode<T> {
-    fn new(element: T::Element, parent: NodeIndex) -> Self {
-        LeafNode { element, parent }
-    }
     fn merkle_hash(&self) -> <T::Element as HashableElement>::Hash {
         self.element.merkle_hash()
     }
@@ -149,12 +144,6 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         }
     }
 
-    /// Get the parent of the node at the given index.
-    fn parent(&self, index: NodeIndex) -> InternalNode<T> {
-        let parent_index = self.parent_index(index);
-        self.node_at(parent_index)
-    }
-
     /// recalculate all the hashes between the most
     /// recently added leaf in the group
     fn rehash_right_path(&mut self) {
@@ -180,10 +169,7 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
 
             match node {
                 InternalNode::Empty => break,
-                InternalNode::Left {
-                    parent,
-                    hash_of_sibling,
-                } => {
+                InternalNode::Left { parent, .. } => {
                     // since we are walking the rightmost path, left nodes do not have
                     // right children. Therefore its sibling hash can be set to
                     // its own hash in its parent half will be set to the combination of
@@ -224,15 +210,43 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
     fn most_recent_node_index(&self) -> NodeIndex {
         NodeIndex(self.nodes.len() as u32 - 1)
     }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
 
-    // ---------------------------------------------------------------
-    // THE BELOW WILL NEED TO MOVE TO impl MerkleTree when I add it
+impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
+    type Hasher = T;
+    /// construct a new, empty merkle tree on the heap and return an Box
+    /// pointing to it.
     fn new(hasher: Arc<T>) -> Box<Self> {
         LinkedMerkleTree::new_with_size(hasher, 33)
     }
 
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    /// Write the vector to an array
+    fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u8(self.tree_depth as u8)?;
+        writer.write_u32::<LittleEndian>(self.len() as u32)?;
+        for element in self.iter_notes() {
+            element.write(writer)?;
+        }
+        Ok(())
+    }
+
+    /// Load a merkle tree from a reader and return a box pointer to it
+    fn read<R: io::Read>(hasher: Arc<T>, reader: &mut R) -> io::Result<Box<Self>> {
+        let tree_depth = reader.read_u8()?;
+        let num_nodes = reader.read_u32::<LittleEndian>()?;
+        let mut tree = LinkedMerkleTree::new_with_size(hasher, tree_depth as usize);
+        for _ in 0..num_nodes {
+            tree.add(tree.hasher.read_element(reader)?);
+        }
+        Ok(tree)
+    }
+
+    /// Expose the hasher
+    fn hasher(&self) -> Arc<T> {
+        self.hasher.clone()
     }
 
     /// Get the number of leaf nodes in the tree
@@ -332,10 +346,7 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
         for depth in 1..std::cmp::min(root_depth, self.tree_depth) {
             match self.node_at(current_node_index) {
                 InternalNode::Empty => panic!("depth should not reach empty node"),
-                InternalNode::Left {
-                    parent,
-                    hash_of_sibling,
-                } => {
+                InternalNode::Left { parent, .. } => {
                     current_hash = self
                         .hasher
                         .combine_hash(depth, &current_hash, &current_hash);
@@ -443,10 +454,7 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
                         }
                         break;
                     }
-                    InternalNode::Right {
-                        hash_of_sibling,
-                        left,
-                    } => {
+                    InternalNode::Right { left, .. } => {
                         my_hash = hasher.combine_hash(depth, &my_hash, &my_hash);
                         let new_node = InternalNode::Left {
                             parent: NodeIndex::from(self.nodes.len() + 1), // This is where the next node *WILL* go
@@ -515,6 +523,68 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
             self.nodes.pop();
         }
         self.rehash_right_path();
+    }
+
+    /// Constructed proof that the leaf node at `position` exists.WitnessNode
+    ///
+    /// Guarantees that the witness_path is tree_depth levels deep by repeatedly hashing
+    /// the last root_hash with itself.
+    fn witness(&self, position: usize) -> Option<Witness<T>> {
+        if self.is_empty() || position >= self.len() {
+            return None;
+        }
+        let mut authentication_path = vec![];
+        let mut current_hash = self.leaves[position].element.merkle_hash();
+        if is_right_leaf(position) {
+            let sibling_hash = self.leaves[position - 1].element.merkle_hash();
+            current_hash = self.hasher.combine_hash(0, &sibling_hash, &current_hash);
+            authentication_path.push(WitnessNode::Right(sibling_hash));
+        } else if position < self.len() - 1 {
+            // I am a left leaf and I have a right sibling
+            let sibling_hash = self.leaves[position + 1].element.merkle_hash();
+            current_hash = self.hasher.combine_hash(0, &current_hash, &sibling_hash);
+            authentication_path.push(WitnessNode::Left(sibling_hash));
+        } else {
+            // I am a left leaf and the rightmost node
+            authentication_path.push(WitnessNode::Left(current_hash.clone()));
+            current_hash = self.hasher.combine_hash(0, &current_hash, &current_hash);
+        }
+        let mut current_position = self.leaves[position].parent;
+        for depth in 1..self.tree_depth {
+            match self.node_at(current_position) {
+                InternalNode::Empty => {
+                    authentication_path.push(WitnessNode::Left(current_hash.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &current_hash);
+                }
+                InternalNode::Left {
+                    parent,
+                    hash_of_sibling,
+                } => {
+                    authentication_path.push(WitnessNode::Left(hash_of_sibling.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &hash_of_sibling);
+                    current_position = parent;
+                }
+                InternalNode::Right {
+                    left,
+                    hash_of_sibling,
+                } => {
+                    authentication_path.push(WitnessNode::Right(hash_of_sibling.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &hash_of_sibling, &current_hash);
+                    current_position = self.parent_index(left);
+                }
+            }
+        }
+        Some(Witness {
+            auth_path: authentication_path,
+            root_hash: self.root_hash().expect("nonempty must have root hash"),
+            tree_size: self.len(),
+        })
     }
 }
 
