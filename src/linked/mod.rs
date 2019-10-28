@@ -323,7 +323,7 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
 
     fn past_root(&self, past_size: usize) -> Option<<T::Element as HashableElement>::Hash> {
         let root_depth = depth_at_leaf_count(past_size);
-        if self.is_empty() || past_size > self.len() {
+        if self.is_empty() || past_size > self.len() || past_size == 0 {
             return None;
         }
         let leaf_index = past_size - 1;
