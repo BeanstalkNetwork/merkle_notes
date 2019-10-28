@@ -610,3 +610,24 @@ fn witness_path() {
         ]
     );
 }
+
+#[test]
+fn serialization() {
+    let mut tree = LinkedMerkleTree::new_with_size(StringHasher::new(), 5);
+    for i in 0..12 {
+        tree.add(i.to_string());
+    }
+    let mut bytes = vec![];
+    tree.write(&mut bytes)
+        .expect("should be able to write bytes.");
+
+    let read_back_tree: Box<LinkedMerkleTree<StringHasher>> =
+        LinkedMerkleTree::read(StringHasher::new(), &mut bytes[..].as_ref())
+            .expect("should be able to read bytes.");
+
+    let mut bytes_again = vec![];
+    read_back_tree
+        .write(&mut bytes_again)
+        .expect("should still be able to write bytes.");
+    assert_eq!(bytes, bytes_again);
+}

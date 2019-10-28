@@ -225,7 +225,7 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
 
     /// Write the vector to an array
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write_u8(self.tree_depth as u8)?;
+        writer.write_u8((self.tree_depth + 1) as u8)?;
         writer.write_u32::<LittleEndian>(self.len() as u32)?;
         for element in self.iter_notes() {
             element.write(writer)?;
