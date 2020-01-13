@@ -84,6 +84,12 @@ pub struct VectorMerkleTree<T: MerkleHasher> {
 }
 
 impl<T: MerkleHasher> VectorMerkleTree<T> {
+    /// Construct a new, empty merkle tree on the heap and return a Box pointer
+    /// to it.
+    pub fn new(hasher: Arc<T>) -> Box<Self> {
+        VectorMerkleTree::new_with_size(hasher, 33)
+    }
+
     /// Used for simpler unit tests
     fn new_with_size(hasher: Arc<T>, tree_depth: usize) -> Box<Self> {
         Box::new(VectorMerkleTree {
@@ -205,13 +211,6 @@ impl<T: MerkleHasher> VectorMerkleTree<T> {
 
 impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     type Hasher = T;
-
-    /// Construct a new, empty merkle tree on the heap and return a Box pointer
-    /// to it.
-    fn new(hasher: Arc<T>) -> Box<Self> {
-        VectorMerkleTree::new_with_size(hasher, 33)
-    }
-
     /// Load a merkle tree from a reader and return a box pointer to it
     fn read<R: io::Read>(hasher: Arc<T>, reader: &mut R) -> io::Result<Box<Self>> {
         let tree_depth = reader.read_u8()?;

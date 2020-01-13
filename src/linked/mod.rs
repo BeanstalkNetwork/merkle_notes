@@ -102,6 +102,12 @@ pub struct LinkedMerkleTree<T: MerkleHasher> {
 }
 
 impl<T: MerkleHasher> LinkedMerkleTree<T> {
+    /// construct a new, empty merkle tree on the heap and return an Box
+    /// pointing to it.
+    pub fn new(hasher: Arc<T>) -> Box<Self> {
+        LinkedMerkleTree::new_with_size(hasher, 33)
+    }
+
     /// The MerkleTree trait has a new associated function that does not
     /// specify the depth. This function is used to make shallower unit tests
     /// that are easier to reason about and faster to execute.
@@ -217,11 +223,6 @@ impl<T: MerkleHasher> LinkedMerkleTree<T> {
 
 impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
     type Hasher = T;
-    /// construct a new, empty merkle tree on the heap and return an Box
-    /// pointing to it.
-    fn new(hasher: Arc<T>) -> Box<Self> {
-        LinkedMerkleTree::new_with_size(hasher, 33)
-    }
 
     /// Write the vector to an array
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {

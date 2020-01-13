@@ -93,10 +93,6 @@ pub trait MerkleHasher {
 pub trait MerkleTree {
     type Hasher: MerkleHasher;
 
-    /// Construct a new, empty merkle tree on the heap that uses the provided
-    /// hasher to calculate hashes and load elements
-    fn new(hasher: Arc<Self::Hasher>) -> Box<Self>;
-
     /// Deserialize the Merkle tree from a reader.
     fn read<R: io::Read>(hasher: Arc<Self::Hasher>, reader: &mut R) -> io::Result<Box<Self>>;
 
