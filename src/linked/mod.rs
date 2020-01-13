@@ -94,6 +94,8 @@ impl<T: MerkleHasher> LeafNode<T> {
     }
 }
 
+/// Linked nodes implementation of MerkleTree trait. Keeps a list of leaves
+/// and nodes, where nodes are defined as in InternalNode above.
 pub struct LinkedMerkleTree<T: MerkleHasher> {
     hasher: Arc<T>,
     leaves: Vec<LeafNode<T>>,

@@ -60,8 +60,8 @@ impl<'a, T: MerkleHasher> Iterator for VectorLeafIterator<'a, T> {
 /// vector as a complete binary tree, and index calculations are used to
 /// look up nodes relative to each other.
 ///
-/// This is not your most performant Merkle
-/// num_nodesPrimary purpose of this implementation is to test the API and get an
+/// This is not your most performant Merkle tree.
+/// The purpose of this implementation is to test the API and get an
 /// implementation up and running for testing external trees as soon
 /// as possible.
 ///
