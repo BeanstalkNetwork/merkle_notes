@@ -1,10 +1,14 @@
 #[macro_use]
 extern crate shrinkwraprs;
+
 use std::fmt::Debug;
 use std::io;
 use std::sync::Arc;
 
 pub mod linked;
+// TODO: RLS doesn't pick stuff up if this is uncommented. :-(
+//#[cfg(rocker)]
+//pub mod rocks;
 pub mod vector;
 
 #[cfg(test)]
