@@ -258,8 +258,8 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
     }
 
     /// Get the leaf note at a specific position
-    fn get(&self, position: usize) -> Option<&<T as MerkleHasher>::Element> {
-        self.leaves.get(position).map(|leaf| &leaf.element)
+    fn get(&self, position: usize) -> Option<<T as MerkleHasher>::Element> {
+        self.leaves.get(position).map(|leaf| leaf.element.clone())
     }
 
     /// Iterate over clones of all leaf notes in the tree, without consuming

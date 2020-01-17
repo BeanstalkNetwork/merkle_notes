@@ -250,13 +250,13 @@ impl<T: MerkleHasher> MerkleTree for VectorMerkleTree<T> {
     }
 
     /// Get the leaf note at a specific position
-    fn get(&self, position: usize) -> Option<&<Self::Hasher as MerkleHasher>::Element> {
+    fn get(&self, position: usize) -> Option<<Self::Hasher as MerkleHasher>::Element> {
         if self.nodes.len() == 0 {
             return None;
         }
         let position = first_leaf(self.nodes.len()) + position;
         match self.nodes.get(position) {
-            Some(Node::Leaf(element)) => Some(element),
+            Some(Node::Leaf(element)) => Some(element.clone()),
             _ => None,
         }
     }

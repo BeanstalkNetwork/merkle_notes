@@ -107,8 +107,8 @@ pub trait MerkleTree {
     /// Insert the new leaf element into the tree, and update all hashes.
     fn add(&mut self, element: <Self::Hasher as MerkleHasher>::Element);
 
-    /// Get a reference to the element at position.
-    fn get(&self, position: usize) -> Option<&<Self::Hasher as MerkleHasher>::Element>;
+    /// Get a clone of the element at position.
+    fn get(&self, position: usize) -> Option<<Self::Hasher as MerkleHasher>::Element>;
 
     /// Get the number of leaf nodes in the tree.
     fn len(&self) -> usize;
