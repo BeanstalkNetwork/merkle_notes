@@ -6,9 +6,8 @@ use std::io;
 use std::sync::Arc;
 
 pub mod linked;
-// TODO: RLS doesn't pick stuff up if this is uncommented. :-(
-//#[cfg(rocker)]
-//pub mod rocks;
+#[cfg(feature = "rocker")]
+pub mod rocks;
 pub mod vector;
 
 #[cfg(test)]
@@ -34,7 +33,7 @@ impl<T> MerkleHash for T where T: Clone + PartialEq + Debug {}
 /// I made the associated functions operate on this class instead of demanding
 /// that such functions exist on the MerkleHash class so that client libraries
 /// can use arbitrary third-party types (so long as they are clonable) as hashes.
-pub trait HashableElement: Clone + PartialEq {
+pub trait HashableElement: Clone + PartialEq + Debug {
     type Hash: MerkleHash;
 
     /// Calculate the hash of this element

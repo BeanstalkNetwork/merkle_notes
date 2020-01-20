@@ -478,10 +478,10 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
     ///
     /// When we truncate, there may be nodes at the "top"
     /// of the tree that should be removed and replaced with a
-    /// link to the empty node. We find this by blocking the rightmost
+    /// link to the empty node. We find this by walking the rightmost
     /// path from the new leaf. All node index higher than the
     /// the maximum index in that path can be cleared and the leftmost node
-    /// habits parent updated to empty.
+    /// has its parent updated to empty.
     fn truncate(&mut self, past_size: usize) {
         if past_size >= self.len() {
             return;
@@ -496,9 +496,6 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
             self.nodes.clear();
             self.nodes.push(InternalNode::Empty);
             return;
-        }
-        if past_size == 1 {
-            self.leaves.clear();
         }
 
         let depth = depth_at_leaf_count(self.len()) - 2;
@@ -519,7 +516,7 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
                     parent: NodeIndex::empty(),
                 }
             }
-            _ => panic!("new group should be left node"),
+            _ => panic!("new root should be left node"),
         }
         let num_to_remove = self.nodes.len() - max_parent.0 as usize - 1;
         for _ in 0..num_to_remove {

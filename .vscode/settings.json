@@ -9,5 +9,10 @@
         "deque",
         "jubjub",
         "performant"
+    ],
+    "rust.all_features": true,
+    "rust.features": [
+        "rocker",
+        "config"
     ]
 }
