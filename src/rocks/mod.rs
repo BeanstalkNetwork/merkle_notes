@@ -1,6 +1,5 @@
-use super::{HashableElement, MerkleHasher, MerkleTree, Witness};
-use config;
-use std::{io, path::PathBuf, sync::Arc};
+use super::{HashableElement, MerkleHasher, MerkleTree, Witness, WitnessNode};
+use std::{io, sync::Arc};
 mod rocker;
 use rocker::{Leaf, LeafIndex, Node, NodeIndex, Rocker};
 
@@ -264,7 +263,6 @@ impl<T: MerkleHasher> MerkleTree for RocksMerkleTree<T> {
             return;
         }
         let depth = depth_at_leaf_count(past_size) - 2;
-        dbg!(depth, past_size);
         let mut parent = self.rocker.get_leaf_parent(LeafIndex(past_size as u32 - 1));
         let mut max_parent = parent;
         for _ in 0..depth {
@@ -293,31 +291,99 @@ impl<T: MerkleHasher> MerkleTree for RocksMerkleTree<T> {
 
     /// Iterate over clones of all leaf notes in the tree, without consuming
     /// the tree.
+    ///
+    /// note: this is completely undefined behaviour if the tree is modified
+    /// while iteration is happening.
     fn iter_notes<'a>(
         &'a self,
     ) -> Box<dyn Iterator<Item = <Self::Hasher as MerkleHasher>::Element> + 'a> {
-        todo!();
+        let leaf_count = self.rocker.num_leaves();
+        Box::new(
+            (0..leaf_count)
+                .map(move |index| self.rocker.get_leaf_element(LeafIndex(index)).unwrap()),
+        )
     }
 
     /// Get the hash of the current root element in the tree.
     fn root_hash(
         &self,
     ) -> Option<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash> {
-        todo!();
+        self.past_root(self.len())
     }
 
     /// Calculate what the root hash was at the time the tree contained
-    /// `past_size` elements.
+    /// `past_size` elements. Returns none if the tree is empty or
+    /// the requested size is greater than the length of the tree.
     fn past_root(
         &self,
         past_size: usize,
     ) -> Option<<<Self::Hasher as MerkleHasher>::Element as HashableElement>::Hash> {
-        todo!();
+        if self.len() == 0 || past_size > self.len() || past_size == 0 {
+            return None;
+        }
+        let root_depth = depth_at_leaf_count(past_size);
+        let leaf_index = LeafIndex(past_size as u32 - 1);
+        let mut current_hash;
+        let mut current_node_index = self.rocker.get_leaf_parent(leaf_index);
+        if leaf_index.is_right() {
+            current_hash = self.hasher.combine_hash(
+                0,
+                &self
+                    .rocker
+                    .get_leaf_metadata(leaf_index.sibling())
+                    .unwrap()
+                    .hash,
+                &self.rocker.get_leaf_metadata(leaf_index).unwrap().hash,
+            );
+        } else {
+            current_hash = self.hasher.combine_hash(
+                0,
+                &self.rocker.get_leaf_metadata(leaf_index).unwrap().hash,
+                &self.rocker.get_leaf_metadata(leaf_index).unwrap().hash,
+            );
+        }
+
+        for depth in 1..std::cmp::min(root_depth, self.tree_depth as usize) {
+            match self.rocker.get_node(current_node_index) {
+                Node::Empty => panic!("depth should not reach empty node"),
+                Node::Left { parent, .. } => {
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &current_hash);
+                    current_node_index = parent;
+                }
+                Node::Right {
+                    left,
+                    hash_of_sibling,
+                } => {
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &hash_of_sibling, &current_hash);
+                    current_node_index = self.rocker.get_node_parent(left);
+                }
+            }
+        }
+        for depth in root_depth..(self.tree_depth as usize) {
+            current_hash = self
+                .hasher
+                .combine_hash(depth, &current_hash, &current_hash);
+        }
+        Some(current_hash)
     }
 
     /// Determine whether a tree contained a value in the past, when it had a specific size.
-    fn contained(&self, value: &<Self::Hasher as MerkleHasher>::Element, past_size: usize) -> bool {
-        todo!();
+    ///
+    /// This is an inefficient linear scan.
+    fn contained(&self, value: &T::Element, past_size: usize) -> bool {
+        for (index, candidate) in self.iter_notes().enumerate() {
+            if index == past_size {
+                break;
+            }
+            if candidate == *value {
+                return true;
+            }
+        }
+        false
     }
 
     /// Construct the proof that the leaf node at `position` exists.
@@ -330,8 +396,64 @@ impl<T: MerkleHasher> MerkleTree for RocksMerkleTree<T> {
     /// the hash of the child of the root node.
     ///
     /// The root hash is not included in the authentication path.
-    fn witness(&self, position: usize) -> Option<Witness<Self::Hasher>> {
-        todo!();
+    fn witness(&self, position: usize) -> Option<Witness<T>> {
+        if self.len() == 0 || position >= self.len() {
+            return None;
+        }
+        let leaf_index = LeafIndex(position as u32);
+        let leaf_data = self.rocker.get_leaf_metadata(leaf_index).unwrap();
+        let mut current_hash = leaf_data.hash;
+        let mut current_position = leaf_data.parent;
+        let mut authentication_path = vec![];
+        if leaf_index.is_right() {
+            let sibling_hash = self.rocker.get_leaf_hash(leaf_index.sibling());
+            current_hash = self.hasher.combine_hash(0, &sibling_hash, &current_hash);
+            authentication_path.push(WitnessNode::Right(sibling_hash));
+        } else if position < self.len() - 1 {
+            // I am a left leaf and I have a right sibling
+            let sibling_hash = self.rocker.get_leaf_hash(leaf_index.sibling());
+            current_hash = self.hasher.combine_hash(0, &current_hash, &sibling_hash);
+            authentication_path.push(WitnessNode::Left(sibling_hash));
+        } else {
+            // I am a left leaf and the rightmost node
+            authentication_path.push(WitnessNode::Left(current_hash.clone()));
+            current_hash = self.hasher.combine_hash(0, &current_hash, &current_hash);
+        }
+        for depth in 1..self.tree_depth as usize {
+            match self.rocker.get_node(current_position) {
+                Node::Empty => {
+                    authentication_path.push(WitnessNode::Left(current_hash.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &current_hash);
+                }
+                Node::Left {
+                    parent,
+                    hash_of_sibling,
+                } => {
+                    authentication_path.push(WitnessNode::Left(hash_of_sibling.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &current_hash, &hash_of_sibling);
+                    current_position = parent;
+                }
+                Node::Right {
+                    left,
+                    hash_of_sibling,
+                } => {
+                    authentication_path.push(WitnessNode::Right(hash_of_sibling.clone()));
+                    current_hash = self
+                        .hasher
+                        .combine_hash(depth, &hash_of_sibling, &current_hash);
+                    current_position = self.rocker.get_node_parent(left);
+                }
+            }
+        }
+        Some(Witness {
+            auth_path: authentication_path,
+            root_hash: self.root_hash().expect("nonempty must have root hash"),
+            tree_size: self.len(),
+        })
     }
 }
 

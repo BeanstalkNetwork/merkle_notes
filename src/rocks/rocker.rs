@@ -1,7 +1,6 @@
-use super::{HashableElement, MerkleHasher, MerkleTree};
-use bincode;
+use super::{HashableElement, MerkleHasher};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use rocksdb::{DBPinnableSlice, Options, DB};
+use rocksdb::DB;
 use std::{path::Path, sync::Arc};
 
 const LEAF_COUNT_KEY: &str = "LeafCount";
@@ -150,6 +149,12 @@ impl<T: MerkleHasher> Rocker<T> {
         self.get_leaf_metadata(index).unwrap().parent
     }
 
+    /// Get the hash of the leaf at given index.
+    /// **Assumes the leaf index exists in the tree**
+    pub(crate) fn get_leaf_hash(&self, index: LeafIndex) -> <T::Element as HashableElement>::Hash {
+        self.get_leaf_metadata(index).unwrap().hash
+    }
+
     pub(crate) fn get_leaf_metadata(&self, index: LeafIndex) -> Option<Leaf<T>> {
         self.get(index.metadata_key(), |mut bytes| {
             let parent = NodeIndex(bytes.read_u32::<LittleEndian>().unwrap());
@@ -274,6 +279,6 @@ impl<T: MerkleHasher> Rocker<T> {
 
 fn u32_as_bytes(value: u32) -> Vec<u8> {
     let mut bytes: Vec<u8> = vec![];
-    bytes.write_u32::<LittleEndian>(value);
+    bytes.write_u32::<LittleEndian>(value).unwrap();
     bytes
 }

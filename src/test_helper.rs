@@ -56,7 +56,7 @@ impl MerkleHasher for StringHasher {
     }
 
     fn read_hash<R: io::Read>(&self, reader: &mut R) -> io::Result<String> {
-        let hash_length = reader.read_u8().unwrap();
+        let hash_length = reader.read_u32::<LittleEndian>().unwrap();
         let mut bytes = vec![0u8; hash_length as usize];
         reader.read_exact(&mut bytes)?;
         Ok(String::from_utf8(bytes).unwrap())
@@ -64,8 +64,7 @@ impl MerkleHasher for StringHasher {
 
     fn write_hash<W: io::Write>(&self, hash: &String, writer: &mut W) -> io::Result<()> {
         let bytes = hash.as_bytes();
-        assert!(bytes.len() < 256);
-        writer.write_u8(bytes.len() as u8)?;
+        writer.write_u32::<LittleEndian>(bytes.len() as u32)?;
         writer.write_all(bytes)
     }
 }

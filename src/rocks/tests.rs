@@ -1,6 +1,6 @@
-use super::rocker::{LeafIndex, Node, NodeIndex, Rocker};
+use super::rocker::{LeafIndex, Node, NodeIndex};
 use super::RocksMerkleTree;
-use crate::{test_helper::StringHasher, MerkleTree};
+use crate::{test_helper::StringHasher, MerkleTree, WitnessNode};
 use tempfile::tempdir;
 
 fn make_tree(characters: &str) -> RocksMerkleTree<StringHasher> {
@@ -17,9 +17,6 @@ fn make_full_tree() -> RocksMerkleTree<StringHasher> {
 }
 
 fn assert_tree(tree: &RocksMerkleTree<StringHasher>, characters: &str) {
-    return;
-    dbg!(characters);
-
     let expected = make_tree(characters);
     assert_eq!(tree.len(), expected.len());
     assert_eq!(tree.rocker.num_nodes(), expected.rocker.num_nodes());
@@ -277,4 +274,366 @@ fn truncate() {
     tree = make_full_tree();
     tree.truncate(17);
     assert_tree(&tree, "abcdefghijklmnop");
+}
+
+#[test]
+fn len() {
+    color_backtrace::install();
+
+    let mut tree = make_tree("");
+    for i in 0..100 {
+        assert_eq!(tree.len(), i);
+        tree.add("a".to_string());
+    }
+}
+
+#[test]
+fn iteration_and_get() {
+    color_backtrace::install();
+    let mut tree = make_tree("");
+    {
+        assert_eq!(tree.get(0), None);
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("a".to_string());
+    {
+        assert_eq!(tree.get(1), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("b".to_string());
+    {
+        assert_eq!(tree.get(2), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+    tree.add("c".to_string());
+    {
+        assert_eq!(tree.get(3), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+    tree.add("d".to_string());
+    {
+        assert_eq!(tree.get(4), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("e".to_string());
+    {
+        assert_eq!(tree.get(5), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        assert_eq!(*tree.get(4).unwrap(), "e".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    tree.add("f".to_string());
+    {
+        assert_eq!(tree.get(6), None);
+        assert_eq!(*tree.get(0).unwrap(), "a".to_string());
+        assert_eq!(*tree.get(1).unwrap(), "b".to_string());
+        assert_eq!(*tree.get(2).unwrap(), "c".to_string());
+        assert_eq!(*tree.get(3).unwrap(), "d".to_string());
+        assert_eq!(*tree.get(4).unwrap(), "e".to_string());
+        assert_eq!(*tree.get(5).unwrap(), "f".to_string());
+        let mut iter = tree.iter_notes();
+        assert_eq!(iter.next(), Some("a".to_string()));
+        assert_eq!(iter.next(), Some("b".to_string()));
+        assert_eq!(iter.next(), Some("c".to_string()));
+        assert_eq!(iter.next(), Some("d".to_string()));
+        assert_eq!(iter.next(), Some("e".to_string()));
+        assert_eq!(iter.next(), Some("f".to_string()));
+        assert_eq!(iter.next(), None);
+    }
+
+    for i in 0..100 {
+        tree.add(i.to_string());
+    }
+    let mut iter = tree.iter_notes();
+    for char in ["a", "b", "c", "d", "e", "f"].iter() {
+        assert_eq!(iter.next(), Some(char.to_string()));
+    }
+
+    for i in 0..100 {
+        assert_eq!(iter.next(), Some(i.to_string()));
+    }
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn contained() {
+    let mut tree = make_tree("");
+    assert!(!tree.contained(&1.to_string(), 0));
+    assert!(!tree.contained(&1.to_string(), 1));
+    for i in 1..20 {
+        tree.add(i.to_string());
+        assert!(tree.contained(&i.to_string(), i));
+        assert!(tree.contained(&i.to_string(), i + 1));
+        assert!(!tree.contained(&i.to_string(), i - 1));
+        assert!(tree.contains(&i.to_string()));
+    }
+}
+
+#[test]
+fn root_hash_functions() {
+    color_backtrace::install();
+    let rocks_directory = tempdir().unwrap();
+    let mut tree = RocksMerkleTree::new_with_size(StringHasher::new(), rocks_directory.path(), 5);
+    assert_eq!(tree.root_hash(), None);
+    assert_eq!(tree.past_root(0), None);
+    assert_eq!(tree.past_root(1), None);
+    tree.add("a".into());
+    assert_eq!(
+        tree.root_hash(), Some( "<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>" .to_string() )
+    );
+    assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(2), None);
+    tree.add("b".into());
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(3), None);
+    tree.add("c".to_string());
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(4), None);
+    tree.add("d".to_string());
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(4), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(5), None);
+    for i in 0..12 {
+        tree.add(i.to_string());
+    }
+    assert_eq!(tree.root_hash(), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(1), Some("<<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>|<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(2), Some("<<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>|<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(3), Some("<<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>|<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(4), Some("<<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(5), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|0-0>|<0|0-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|0-0>|<0|0-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(6), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<0|1-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<0|1-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(7), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|2-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|2-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(8), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(9), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|4-0>|<4|4-0>-1>|<<4|4-0>|<4|4-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(10), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<4|5-0>-1>|<<4|5-0>|<4|5-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(11), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|6-0>-1>|<<4|5-0>|<6|6-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(12), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<4|5-0>|<6|7-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(13), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|8-0>|<8|8-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(14), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<8|9-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(15), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|10-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(16), Some("<<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>|<<<4|5-0>|<6|7-0>-1>|<<8|9-0>|<10|11-0>-1>-2>-3>".to_string()));
+    assert_eq!(tree.past_root(17), None);
+}
+#[test]
+fn witness_path() {
+    color_backtrace::install();
+    let rocks_directory = tempdir().unwrap();
+    let mut tree = RocksMerkleTree::new_with_size(StringHasher::new(), rocks_directory.path(), 4);
+    assert!(tree.witness(0).is_none());
+
+    tree.add("a".to_string());
+    assert!(tree.witness(1).is_none());
+    let mut expected_root = "<<<a|a-0>|<a|a-0>-1>|<<a|a-0>|<a|a-0>-1>-2>";
+    let mut witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(witness.tree_size, 1);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("a".to_string()),
+            WitnessNode::Left("<a|a-0>".to_string()),
+            WitnessNode::Left("<<a|a-0>|<a|a-0>-1>".to_string()),
+        ]
+    );
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"b".to_string()));
+
+    tree.add("b".to_string());
+    expected_root = "<<<a|b-0>|<a|b-0>-1>|<<a|b-0>|<a|b-0>-1>-2>";
+    assert!(tree.witness(2).is_none());
+    witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.tree_size, 2);
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"b".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("b".to_string()),
+            WitnessNode::Left("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(1).expect("path exists");
+    assert_eq!(witness.tree_size, 2);
+    assert!(witness.verify(&tree.hasher, &"b".to_string()));
+    assert!(!witness.verify(&tree.hasher, &"a".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("a".to_string()),
+            WitnessNode::Left("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<a|b-0>-1>".to_string()),
+        ]
+    );
+
+    tree.add("c".to_string());
+    expected_root = "<<<a|b-0>|<c|c-0>-1>|<<a|b-0>|<c|c-0>-1>-2>";
+    assert!(tree.witness(3).is_none());
+    witness = tree.witness(0).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"a".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("b".to_string()),
+            WitnessNode::Left("<c|c-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(1).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"b".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("a".to_string()),
+            WitnessNode::Left("<c|c-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(2).expect("path exists");
+    assert_eq!(witness.tree_size, 3);
+    assert!(witness.verify(&tree.hasher, &"c".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|c-0>-1>".to_string()),
+        ]
+    );
+    tree.add("d".to_string());
+    expected_root = "<<<a|b-0>|<c|d-0>-1>|<<a|b-0>|<c|d-0>-1>-2>";
+    witness = tree.witness(3).expect("path exists");
+    assert_eq!(witness.tree_size, 4);
+    assert_eq!(witness.root_hash, expected_root);
+    assert!(witness.verify(&tree.hasher, &"d".to_string()));
+    assert!(tree.witness(4).is_none());
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    for i in 0..4 {
+        tree.add(i.to_string());
+    }
+    expected_root = "<<<a|b-0>|<c|d-0>-1>|<<0|1-0>|<2|3-0>-1>-2>";
+    assert!(tree.witness(8).is_none());
+    witness = tree.witness(3).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"d".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("c".to_string()),
+            WitnessNode::Right("<a|b-0>".to_string()),
+            WitnessNode::Left("<<0|1-0>|<2|3-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(4).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"0".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("1".to_string()),
+            WitnessNode::Left("<2|3-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(5).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"1".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("0".to_string()),
+            WitnessNode::Left("<2|3-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(6).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"2".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Left("3".to_string()),
+            WitnessNode::Right("<0|1-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
+    witness = tree.witness(7).expect("path exists");
+    assert_eq!(witness.tree_size, 8);
+    assert!(witness.verify(&tree.hasher, &"3".to_string()));
+    assert_eq!(witness.root_hash, expected_root);
+    assert_eq!(
+        witness.auth_path,
+        vec![
+            WitnessNode::Right("2".to_string()),
+            WitnessNode::Right("<0|1-0>".to_string()),
+            WitnessNode::Right("<<a|b-0>|<c|d-0>-1>".to_string()),
+        ]
+    );
 }
