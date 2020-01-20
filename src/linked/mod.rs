@@ -286,42 +286,7 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
     /// The current root hash of the tree. Start with the left-most node
     /// and expected depth and walk the tree up to the root.
     fn root_hash(&self) -> Option<<T::Element as HashableElement>::Hash> {
-        if self.is_empty() {
-            return None;
-        }
-        let left_hash = self.leaves[0].merkle_hash();
-        let right_hash = self
-            .leaves
-            .get(1)
-            .map(|node| node.merkle_hash())
-            .or(Some(left_hash.clone()))
-            .unwrap();
-        let mut depth = 0;
-        let mut current_hash = self.hasher.combine_hash(depth, &left_hash, &right_hash);
-        let mut current_node_index = self.leaves[0].parent;
-        depth = 1;
-        while depth != self.tree_depth {
-            let current_node = self.node_at(current_node_index);
-            current_hash = match current_node {
-                InternalNode::Left {
-                    hash_of_sibling, ..
-                } => self
-                    .hasher
-                    .combine_hash(depth, &current_hash, &hash_of_sibling),
-                InternalNode::Right {
-                    hash_of_sibling, ..
-                } => self
-                    .hasher
-                    .combine_hash(depth, &hash_of_sibling, &current_hash),
-                InternalNode::Empty => {
-                    self.hasher
-                        .combine_hash(depth, &current_hash, &current_hash)
-                }
-            };
-            current_node_index = self.parent_index(current_node_index);
-            depth += 1;
-        }
-        Some(current_hash)
+        self.past_root(self.len())
     }
 
     fn past_root(&self, past_size: usize) -> Option<<T::Element as HashableElement>::Hash> {
@@ -366,6 +331,7 @@ impl<T: MerkleHasher> MerkleTree for LinkedMerkleTree<T> {
                 }
             }
         }
+
         for depth in root_depth..self.tree_depth {
             current_hash = self
                 .hasher
