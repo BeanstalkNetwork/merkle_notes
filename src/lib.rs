@@ -8,6 +8,8 @@ use std::sync::Arc;
 pub mod linked;
 #[cfg(feature = "rocker")]
 pub mod rocks;
+#[cfg(feature = "sledder")]
+pub mod sled;
 pub mod vector;
 
 #[cfg(test)]

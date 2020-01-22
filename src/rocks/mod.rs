@@ -9,6 +9,9 @@ use rocker::{Leaf, LeafIndex, Node, NodeIndex, Rocker};
 ///
 /// Note: All of the rocksdb operations get unwrap()ed because the merkle tree
 /// trait doesn't permit returning Results. This is obviously not safe...
+///
+/// There is no transaction support in the Rust RocksDB wrapper. This
+/// module is not recommended; use sled instead, even though it is beta.
 pub struct RocksMerkleTree<T: MerkleHasher> {
     hasher: Arc<T>,
     rocker: Rocker<T>,

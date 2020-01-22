@@ -2,7 +2,6 @@
 /// a vector (actually, I used a deque, it's not quite as inefficient)
 /// as a complete binary tree. This is dreadfully inefficient, but
 /// it was a quick way to get an API implementation up and running.
-extern crate byteorder;
 use super::{HashableElement, MerkleHasher, MerkleTree, Witness, WitnessNode};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::VecDeque;
