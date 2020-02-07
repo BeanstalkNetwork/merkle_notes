@@ -5,8 +5,8 @@ use sled::Transactional;
 use tempfile::tempdir;
 
 fn make_tree(characters: &str) -> SledMerkleTree<StringHasher> {
-    let rocks_directory = tempdir().unwrap();
-    let mut tree = SledMerkleTree::new(StringHasher::new(), rocks_directory.path());
+    let sled_directory = tempdir().unwrap();
+    let mut tree = SledMerkleTree::new(StringHasher::new(), sled_directory.path());
     for character in characters.chars() {
         tree.add(character.to_string());
     }
