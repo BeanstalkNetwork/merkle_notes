@@ -167,6 +167,7 @@ pub trait MerkleTree {
 ///
 /// The Left/Right is the Hash of THIS node, but the MerkleHash at node.0 is
 /// the hash of the SIBLING node.
+#[derive(PartialEq, Debug)]
 pub enum WitnessNode<H: MerkleHash> {
     Left(H),
     Right(H),
@@ -175,6 +176,7 @@ pub enum WitnessNode<H: MerkleHash> {
 /// Commitment that a leaf node exists in the tree, with an authentication path
 /// and the root_hash of the tree at the time the authentication_path was
 /// calculated.
+#[derive(PartialEq, Debug)]
 pub struct Witness<H: MerkleHasher> {
     pub tree_size: usize,
     pub root_hash: <H::Element as HashableElement>::Hash,

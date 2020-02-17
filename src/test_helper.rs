@@ -1,6 +1,5 @@
-use crate::{HashableElement, MerkleHasher, WitnessNode};
+use crate::{HashableElement, MerkleHasher};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::fmt;
 use std::io;
 use std::io::Read;
 use std::sync::Arc;
@@ -66,25 +65,6 @@ impl MerkleHasher for StringHasher {
         let bytes = hash.as_bytes();
         writer.write_u32::<LittleEndian>(bytes.len() as u32)?;
         writer.write_all(bytes)
-    }
-}
-
-impl fmt::Debug for WitnessNode<String> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            WitnessNode::Left(hash) => write!(f, "Left {}", hash),
-            WitnessNode::Right(hash) => write!(f, "Right {}", hash),
-        }
-    }
-}
-
-impl PartialEq for WitnessNode<String> {
-    fn eq(&self, other: &WitnessNode<String>) -> bool {
-        match (self, other) {
-            (WitnessNode::Left(a), WitnessNode::Left(b)) => a == b,
-            (WitnessNode::Right(a), WitnessNode::Right(b)) => a == b,
-            (_, _) => false,
-        }
     }
 }
 
