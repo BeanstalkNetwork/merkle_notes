@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate shrinkwraprs;
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::io;
 use std::sync::Arc;
 
@@ -176,7 +176,7 @@ pub enum WitnessNode<H: MerkleHash> {
 /// Commitment that a leaf node exists in the tree, with an authentication path
 /// and the root_hash of the tree at the time the authentication_path was
 /// calculated.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq)]
 pub struct Witness<H: MerkleHasher> {
     pub tree_size: usize,
     pub root_hash: <H::Element as HashableElement>::Hash,
@@ -197,5 +197,21 @@ impl<H: MerkleHasher> Witness<H> {
         }
 
         cur_hash == self.root_hash
+    }
+}
+
+impl<H: MerkleHasher> fmt::Debug for Witness<H> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "Witness {{")?;
+        writeln!(f, "    tree_size: {}", self.tree_size)?;
+        writeln!(f, "    root_hash: {:?}", self.root_hash)?;
+        writeln!(f, "    auth_path: {{")?;
+
+        for hash in self.auth_path.iter() {
+            writeln!(f, "        {:?},", hash)?;
+        }
+        writeln!(f, "    }}")?;
+        writeln!(f, "}}")?;
+        Ok(())
     }
 }
